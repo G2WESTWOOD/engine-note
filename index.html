@@ -82,6 +82,10 @@ input[type=range]{width:100%;accent-color:var(--amber);height:32px}
       <div class="label">Engine</div>
       <div class="chips" id="chips"></div>
     </div>
+    <div>
+      <div class="label">Honda</div>
+      <div class="chips" id="chipsHonda"></div>
+    </div>
 
     <div class="opts">
       <div><div class="label">Turbo</div><div class="chips" id="optTurbo"></div></div>
@@ -123,6 +127,13 @@ const PRESETS = {
   r3:    {name:'Triple-Rotor',     cyl:6,  idle:1050, red:9500, gears:[3.48,2.02,1.39,1.0,0.76],      fd:4.1,  lope:.22, rasp:.5,  bright:1.9, drive:3.2, turbo:true,  spool:.7,  layout:'front', sub:.75, rotary:true},
   r4:    {name:'Quad-Rotor Race',  cyl:8,  idle:1200, red:9800, gears:[3.1,2.2,1.65,1.3,1.05,0.88],   fd:4.4,  lope:.18, rasp:.55, bright:2.1, drive:3.0, turbo:false, spool:.6,  layout:'mid',   sub:.8,  rotary:true},
   diesel:{name:'Diesel Truck',     cyl:6,  idle:650,  red:3800, gears:[4.7,2.99,2.15,1.77,1.52,1.28,1.0,0.85,0.69,0.64], fd:3.73, lope:.2, rasp:.6, bright:.55, drive:3.6, turbo:true, spool:1.1, layout:'front', sub:1.2},
+  // Honda: vtec = rpm where the high-lift cam engages (louder, harder, more intake honk)
+  b16:   {name:'B16 VTEC',     honda:true, cyl:4, idle:850,  red:8200,  gears:[3.23,2.1,1.46,1.03,0.78],          fd:4.4,  lope:.05, rasp:.4,  bright:1.35, drive:2.9, turbo:false, spool:.4,  layout:'front', sub:.55, vtec:5600},
+  k20:   {name:'K20 VTEC',     honda:true, cyl:4, idle:800,  red:8400,  gears:[3.27,2.13,1.52,1.15,0.92,0.74],     fd:4.76, lope:.04, rasp:.42, bright:1.4,  drive:2.8, turbo:false, spool:.4,  layout:'front', sub:.6,  vtec:5800},
+  f20c:  {name:'F20C Roadster',honda:true, cyl:4, idle:900,  red:9000,  gears:[3.13,2.05,1.48,1.16,0.97,0.81],     fd:4.1,  lope:.04, rasp:.45, bright:1.6,  drive:2.9, turbo:false, spool:.4,  layout:'front', sub:.55, vtec:6000},
+  c30a:  {name:'NSX V6',       honda:true, cyl:6, idle:800,  red:8000,  gears:[3.07,1.95,1.43,1.13,0.91,0.72],     fd:4.06, lope:.05, rasp:.35, bright:1.45, drive:2.4, turbo:false, spool:.5,  layout:'mid',   sub:.7,  vtec:5800},
+  k20t:  {name:'Type R Turbo', honda:true, cyl:4, idle:800,  red:7000,  gears:[3.63,2.12,1.53,1.13,0.91,0.73],     fd:4.11, lope:.04, rasp:.38, bright:1.25, drive:2.7, turbo:true,  spool:.5,  layout:'front', sub:.65, vtec:4500},
+  cbr:   {name:'CBR600 Inline-4',honda:true,cyl:4,idle:1300, red:15000, gears:[2.75,2.0,1.67,1.44,1.3,1.18],       fd:5.91, lope:.02, rasp:.5,  bright:2.3,  drive:2.5, turbo:false, spool:.4,  layout:'mid',   sub:.4},
 };
 const TIRE=2.1; // tire circumference, m
 let key='v8',P=PRESETS.v8;
@@ -214,7 +225,8 @@ function buildAudio(){
   const exLp=bq('lowpass',1500,2.2),body=bq('peaking',180,1);body.gain.value=4;
   fire.connect(gFire).connect(exBus);half.connect(gHalf).connect(exBus);harm.connect(gHarm).connect(exBus);
   rasp.connect(raspBp).connect(gRasp).connect(exBus);
-  exBus.connect(shaper).connect(exLp).connect(body).connect(engine);
+  const vtecPk=bq('peaking',650,1.2);vtecPk.gain.value=0;
+  exBus.connect(shaper).connect(vtecPk).connect(exLp).connect(body).connect(engine);
   const exOut=g(1);engine.connect(exOut);
   const dL=c.createDelay(.01),dR=c.createDelay(.01);dL.delayTime.value=.0004;dR.delayTime.value=.0011;
   const tL=bq('lowpass',9000),tR=bq('lowpass',7600);
@@ -237,7 +249,7 @@ function buildAudio(){
   const whoosh=loopNoise(),wbp=bq('bandpass',1500,.9),gWhoosh=g(0);
   wh1.connect(gWh);wh2.connect(gWh);gWh.connect(turboIn);whoosh.connect(wbp).connect(gWhoosh).connect(turboIn);
 
-  nodes={nbuf,engine,fire,half,harm,gFire,gHalf,gHarm,raspBp,gRasp,lope,lopeDepth,shaper,exLp,
+  nodes={nbuf,engine,vtecPk,fire,half,harm,gFire,gHalf,gHarm,raspBp,gRasp,lope,lopeDepth,shaper,exLp,
     mech,gMech,vBp,gValve,blockLp,blockLvl,s1,s2,gS1,gS2,subLvl,wh1,wh2,gWh,wbp,gWhoosh,
     pTipL,pTipR,turboIn,subIn,pBlock,pTurbo,out};
   applyPreset();
@@ -257,6 +269,9 @@ function updateAudio(){
   if(!nodes)return;
   const n=nodes,t=ctx.currentTime,k=.04,rpm=Math.max(S.rpm,200),rn=rpm/P.red,th=S.throttle,on=S.running;
   const f=rpm/60*P.cyl/2;
+  const v=S.vtec?1:0; // VTEC: second cam profile — harder edge, more rasp, intake honk up front
+  n.vtecPk.gain.setTargetAtTime(v*9,t,.06);
+  n.vtecPk.frequency.setTargetAtTime(500+rn*600,t,k);
   // exhaust
   n.fire.frequency.setTargetAtTime(f,t,k);
   n.half.frequency.setTargetAtTime(f/2,t,k);
@@ -264,10 +279,10 @@ function updateAudio(){
   n.lope.frequency.setTargetAtTime(rpm/120,t,k);
   n.lopeDepth.gain.setTargetAtTime(P.lope*Math.max(0,1-rn*1.6)*.6,t,.1);
   n.raspBp.frequency.setTargetAtTime(Math.min(f*3,9000),t,k);
-  n.gRasp.gain.setTargetAtTime(P.rasp*(.25+th*.9)*(.4+rn),t,k);
+  n.gRasp.gain.setTargetAtTime(P.rasp*(.25+th*.9)*(.4+rn)*(1+v*.7),t,k);
   n.gHalf.gain.setTargetAtTime(P.rotary?.08:.18+P.lope*.35,t,.1);
   n.gHarm.gain.setTargetAtTime(P.rotary?.32+rn*.15:.15,t,.1);
-  n.exLp.frequency.setTargetAtTime(Math.min((260+rpm*.35*P.bright)*(.55+th*.9),14000),t,k);
+  n.exLp.frequency.setTargetAtTime(Math.min((260+rpm*.35*P.bright)*(.55+th*.9)*(1+v*.5),14000),t,k);
   n.engine.gain.setTargetAtTime(on?(.35+th*.55+rn*.25):0,t,.05);
   // block
   n.mech.frequency.setTargetAtTime(f*2,t,k);
@@ -275,7 +290,7 @@ function updateAudio(){
   n.vBp.frequency.setTargetAtTime(2500+rn*4000,t,k);
   n.gValve.gain.setTargetAtTime((P.rotary?.04:.09)*(.4+rn),t,.1);
   n.blockLp.frequency.setTargetAtTime(1200+rpm*.5,t,k);
-  n.blockLvl.gain.setTargetAtTime(on?(.25+th*.25)*(P.layout==='front'?1:.8):0,t,.08);
+  n.blockLvl.gain.setTargetAtTime(on?(.25+th*.25)*(P.layout==='front'?1:.8)*(1+v*.9):0,t,.08);
   // sub: strongest at low rpm under load, the way a real engine shakes the cabin
   const bass=$('bass').value/100*P.sub;
   n.s1.frequency.setTargetAtTime(f/2,t,k);
@@ -377,6 +392,8 @@ function update(dt,now){
     if(rnd()<(opt.pops==='loud'?.6:.2))bang(popLvl()*.8);
   }
   S.rpm=Math.min(S.rpm,P.red);
+  // VTEC engages above crossover under load, drops out with hysteresis
+  if(P.vtec){if(!S.vtec&&S.rpm>P.vtec&&S.throttle>.35)S.vtec=true;else if(S.vtec&&(S.rpm<P.vtec*.94||S.throttle<.15))S.vtec=false}else S.vtec=false;
 
   const load=clamp((S.rpm-P.red*.28)/(P.red*.3));
   const bt=opt.turbo?S.throttle*load*(stopped?.65:1):0;
@@ -441,10 +458,16 @@ const layoutTag={front:'',mid:' · mid-engine',rear:' · rear-engine'};
 let refreshTurbo;
 function selectPreset(k){
   key=k;P=PRESETS[k];opt.turbo=P.turbo;S.boost=0;applyPreset();
-  $('presetName').textContent=P.name+(P.rotary?' · rotary':'')+(P.turbo?' · turbo':'')+layoutTag[P.layout];
+  S.vtec=false;
+  $('presetName').textContent=P.name+(P.rotary?' · rotary':'')+(P.vtec?' · VTEC '+P.vtec+' rpm':'')+(P.turbo?' · turbo':'')+layoutTag[P.layout];
   refreshTurbo&&refreshTurbo();save();
 }
-group('chips',Object.entries(PRESETS).map(([k,p])=>[k,p.name+(p.rotary?'<small>rotary</small>':'')+(p.turbo?'<small>turbo</small>':'')]),()=>key,selectPreset);
+const chipLabel=p=>p.name+(p.rotary?'<small>rotary</small>':'')+(p.vtec?'<small>vtec</small>':'')+(p.turbo?'<small>turbo</small>':'');
+const presetsBy=h=>Object.entries(PRESETS).filter(([,p])=>!!p.honda===h).map(([k,p])=>[k,chipLabel(p)]);
+let refreshA,refreshB;
+const pick=k=>{selectPreset(k);refreshA&&refreshA();refreshB&&refreshB()};
+refreshA=group('chips',presetsBy(false),()=>key,pick);
+refreshB=group('chipsHonda',presetsBy(true),()=>key,pick);
 refreshTurbo=group('optTurbo',[[false,'Off'],[true,'On']],()=>opt.turbo,v=>{opt.turbo=v;S.boost=0});
 group('optBov',[['psssh','Pssh'],['flutter','Flutter']],()=>opt.bov,v=>{opt.bov=v;save()});
 group('optPops',[['off','Off'],['mild','Mild'],['loud','Loud']],()=>opt.pops,v=>{opt.pops=v;save()});
@@ -454,7 +477,7 @@ group('optSrc',[['gps','Car GPS'],['sim','Simulator']],()=>opt.src,v=>{opt.src=v
 try{const s=JSON.parse(localStorage.getItem('en_v3')||'null');if(s){
   for(const k of ['bov','pops','spatial'])if(s[k])opt[k]=s[k];
   if(s.bass!=null)$('bass').value=s.bass;
-  if(PRESETS[s.key])$('chips').querySelector(`[data-v="${s.key}"]`).click()}
+  if(PRESETS[s.key])document.querySelector(`#chips [data-v="${s.key}"], #chipsHonda [data-v="${s.key}"]`).click()}
   for(const [id,k] of [['optBov','bov'],['optPops','pops'],['optSpatial','spatial']])$(id).querySelector(`[data-v="${opt[k]}"]`).click();
 }catch(e){}
 
@@ -495,7 +518,7 @@ function loop(now){
   $('speed').textContent=Math.round(S.speed*3.6);
   $('gear').textContent=S.gear===0?'N':S.gear;
   $('rpm').textContent=Math.round(S.rpm/10)*10+' RPM';
-  $('boost').textContent=opt.turbo?(S.boost*1.6).toFixed(1)+' bar':'';
+  $('boost').textContent=[opt.turbo?(S.boost*1.6).toFixed(1)+' bar':'',S.vtec?'VTEC':''].filter(Boolean).join(' · ');
   drawTach();requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
