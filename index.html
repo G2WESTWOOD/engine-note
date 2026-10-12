@@ -1,3 +1,7 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Engine Note</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -10,6 +14,7 @@
   --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   color-scheme:dark;
 }
+[hidden]{display:none!important}
 html,body{height:100%}
 body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;padding-inline:16px;padding-block:16px;box-sizing:border-box}
 .wrap{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:24px;align-items:start}
@@ -501,10 +506,14 @@ $('bass').onchange=save;
 
 let wake=null;
 async function lockWake(){try{wake=await navigator.wakeLock?.request('screen')}catch(e){}}
-$('startBtn').onclick=async()=>{
-  buildAudio();await ctx.resume();S.running=true;nodes.out.gain.value=$('vol').value/100;
-  nodes.engine.gain.cancelScheduledValues(ctx.currentTime);
-  startupCrank();$('overlay').hidden=true;lockWake();
+$('startBtn').onclick=()=>{
+  $('overlay').hidden=true;
+  try{
+    buildAudio();ctx.resume();S.running=true;nodes.out.gain.value=$('vol').value/100;
+    nodes.engine.gain.cancelScheduledValues(ctx.currentTime);
+    startupCrank();
+  }catch(e){setGps('bad','Audio failed to start: '+e.message)}
+  lockWake();
   if(opt.src==='gps')startGps();
 };
 $('stopBtn').onclick=()=>{S.running=false;S.boost=0;$('overlay').hidden=false};
