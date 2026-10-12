@@ -82,6 +82,7 @@ input[type=range]{width:100%;accent-color:var(--amber);height:32px}
   <div class="side">
     <div class="readout"><div class="speed" id="speed">0</div><div class="unit">km/h</div></div>
     <div class="status"><span class="dot" id="gpsDot"></span><span id="gpsText">GPS not started</span></div>
+    <div class="status"><span class="dot" id="motDot"></span><span id="motText">Motion sensor off</span></div>
 
     <div>
       <div class="label">Engine</div>
@@ -90,6 +91,12 @@ input[type=range]{width:100%;accent-color:var(--amber);height:32px}
     <div>
       <div class="label">Honda</div>
       <div class="chips" id="chipsHonda"></div>
+    </div>
+    <div>
+      <div class="label">Recorded</div>
+      <div class="chips" id="chipsRec"></div>
+      <div class="row" style="margin-top:8px"><label class="chip" for="recFiles">Load recordings…</label><input type="file" id="recFiles" accept="audio/*,.wav,.ogg,.mp3,.flac" multiple hidden></div>
+      <p class="note" id="recNote" style="margin-top:6px">Name files like v8_3000_on.wav and v8_3000_off.wav.</p>
     </div>
 
     <div class="opts">
@@ -296,7 +303,9 @@ function buildAudio(){
   fire.connect(gFire).connect(exBus);half.connect(gHalf).connect(exBus);harm.connect(gHarm).connect(exBus);
   rasp.connect(raspBp).connect(gRasp).connect(exBus);
   const vtecPk=bq('peaking',650,1.2);vtecPk.gain.value=0;
-  exBus.connect(shaper).connect(vtecPk).connect(exLp).connect(body).connect(engine);
+  const synthMute=g(1),sampleBus=g(1);
+  exBus.connect(shaper).connect(vtecPk).connect(exLp).connect(body).connect(synthMute).connect(engine);
+  sampleBus.connect(engine);
   const exOut=g(1);engine.connect(exOut);
   const dL=c.createDelay(.01),dR=c.createDelay(.01);dL.delayTime.value=.0004;dR.delayTime.value=.0011;
   const tL=bq('lowpass',9000),tR=bq('lowpass',7600);
@@ -320,13 +329,107 @@ function buildAudio(){
   const whoosh=loopNoise(),wbp=bq('bandpass',1500,.9),gWhoosh=g(0);
   wh1.connect(gWh);wh2.connect(gWh);gWh.connect(turboIn);whoosh.connect(wbp).connect(gWhoosh).connect(turboIn);
 
-  nodes={nbuf,engine,vtecPk,exBus,fire,half,harm,gFire,gHalf,gHarm,raspBp,gRasp,lope,lopeDepth,shaper,exLp,
+  nodes={nbuf,engine,vtecPk,exBus,synthMute,sampleBus,fire,half,harm,gFire,gHalf,gHarm,raspBp,gRasp,lope,lopeDepth,shaper,exLp,
     mech,gMech,vBp,gValve,blockLp,blockLvl,s1,s2,gS1,gS2,subLvl,wh1,wh2,gWh,wbp,gWhoosh,
     pTipL,pTipR,turboIn,subIn,pBlock,pTurbo,out};
   applyPreset();
   engine.gain.setValueAtTime(0,t);engine.gain.linearRampToValueAtTime(.9,t+.6);
 }
-function applyPreset(){if(!nodes)return;nodes.shaper.curve=shaperCurve(P.drive);nodes.harm.type=P.rotary?'square':'triangle';setLayout();if(nodes.eng)nodes.eng.port.postMessage(engCfg(key,P))}
+function applyPreset(){if(!nodes)return;nodes.shaper.curve=shaperCurve(P.drive);nodes.harm.type=P.rotary?'square':'triangle';setLayout();if(nodes.eng)nodes.eng.port.postMessage(engCfg(key,P));setSampleEngine()}
+
+// ---------- recorded engines (rpm-indexed loops, on/off throttle) ----------
+const REC={};let recVoices=null;
+function makeLoop(buf){
+  const sr=buf.sampleRate,X=Math.floor(.06*sr),skip=Math.floor(Math.min(.3,buf.duration*.15)*sr);
+  const L=Math.min(Math.floor(2.5*sr),buf.length-2*skip-X);
+  if(L<X*4)return buf;
+  const out=ctx.createBuffer(buf.numberOfChannels,L,sr);
+  for(let ch=0;ch<buf.numberOfChannels;ch++){const s=buf.getChannelData(ch),o=out.getChannelData(ch);
+    for(let i=0;i<L;i++)o[i]=s[skip+i];
+    for(let i=0;i<X;i++){const a=i/X;o[i]=s[skip+i]*Math.sqrt(a)+s[skip+L+i]*Math.sqrt(1-a)}}
+  return out;
+}
+function rms(b){let s=0,n=0;for(let ch=0;ch<b.numberOfChannels;ch++){const d=b.getChannelData(ch);for(let i=0;i<d.length;i+=4){s+=d[i]*d[i];n++}}return Math.sqrt(s/Math.max(n,1))}
+function parseName(n){const m=n.toLowerCase().replace(/\.[a-z0-9]+$/,'').match(/^(.+?)[_\- ](\d{3,5})[_\- ]?(on|off)$/);return m&&{eng:m[1],rpm:+m[2],mode:m[3]}}
+async function addRecordings(items){ // items: [{name, data:ArrayBuffer}]
+  ctx=ctx||makeCtx();
+  const by={};
+  for(const it of items){const p=parseName(it.name);if(!p)continue;
+    try{const b=makeLoop(await ctx.decodeAudioData(it.data.slice(0)));(by[p.eng]=by[p.eng]||{})[p.rpm]=Object.assign((by[p.eng]||{})[p.rpm]||{rpm:p.rpm},{[p.mode]:b})}catch(e){}}
+  const added=[];
+  for(const [eng,map] of Object.entries(by)){
+    const clips=Object.values(map).filter(c=>c.on||c.off).map(c=>({rpm:c.rpm,on:c.on||c.off,off:c.on?c.off||null:null})).sort((a,b)=>a.rpm-b.rpm);
+    if(!clips.length)continue;
+    const peak=Math.max(...clips.map(c=>rms(c.on)))||1,sc=.22/peak;
+    for(const c of clips)for(const b of [c.on,c.off])if(b)for(let ch=0;ch<b.numberOfChannels;ch++){const d=b.getChannelData(ch);for(let i=0;i<d.length;i++)d[i]*=sc}
+    const id='rec_'+eng.replace(/[^a-z0-9]/g,'');
+    const lo=clips[0].rpm,hi=clips[clips.length-1].rpm;
+    PRESETS[id]={name:eng.replace(/[_-]/g,' ').replace(/\b\w/g,c=>c.toUpperCase()),rec:true,cyl:4,idle:Math.max(600,Math.min(lo,1100)),red:hi,
+      gears:[3.3,2.1,1.5,1.15,.92,.76],fd:4.1,lope:0,rasp:.3,bright:1.2,drive:2,turbo:false,spool:.5,layout:'front',sub:.5};
+    REC[id]=clips;added.push(id);
+  }
+  buildRecRow();
+  if(added.length)pick(added[0]);
+  $('recNote').textContent=added.length?'Loaded '+added.map(id=>PRESETS[id].name+' ('+REC[id].length+' rpm points)').join(', ')+'.':'No usable files. Name them like v8_3000_on.wav.';
+}
+function setSampleEngine(){
+  if(!nodes)return;
+  if(recVoices){recVoices.forEach(v=>{v.on.src.stop();v.off&&v.off.src.stop()});recVoices=null}
+  const clips=REC[key];const t=ctx.currentTime;
+  nodes.synthMute.gain.setTargetAtTime(clips?0:1,t,.05);
+  if(!clips)return;
+  const voice=b=>{const src=ctx.createBufferSource();src.buffer=b;src.loop=true;const g=ctx.createGain();g.gain.value=0;src.connect(g).connect(nodes.sampleBus);src.start(t,Math.random()*b.duration);return{src,g}};
+  recVoices=clips.map(c=>({rpm:c.rpm,on:voice(c.on),off:c.off?voice(c.off):null}));
+}
+function updateSamples(rpm,th,t){
+  const cl=recVoices;if(!cl)return;
+  let i=0;while(i<cl.length-2&&rpm>cl[i+1].rpm)i++;
+  const w=cl.length>1?clamp((rpm-cl[i].rpm)/(cl[i+1].rpm-cl[i].rpm)):0;
+  const on=Math.sqrt(th),off=Math.sqrt(1-th),run=S.running?1:0;
+  cl.forEach((v,j)=>{const g=(j===i?Math.cos(w*Math.PI/2):j===i+1?Math.sin(w*Math.PI/2):0)*run,r=clamp(rpm/v.rpm,.5,2.2);
+    v.on.src.playbackRate.setTargetAtTime(r,t,.03);v.on.g.gain.setTargetAtTime(g*(v.off?on:1),t,.03);
+    if(v.off){v.off.src.playbackRate.setTargetAtTime(r,t,.03);v.off.g.gain.setTargetAtTime(g*off,t,.03)}});
+}
+async function loadHostedSamples(){
+  try{const r=await fetch('samples/index.json',{cache:'no-cache'});if(!r.ok)return;const idx=await r.json();
+    const items=[];for(const f of idx.files||[]){const rr=await fetch('samples/'+f);if(rr.ok)items.push({name:f.split('/').pop(),data:await rr.arrayBuffer()})}
+    if(items.length)await addRecordings(items);
+  }catch(e){}
+}
+
+// ---------- motion sensor (phone): instant throttle + speed between GPS fixes ----------
+const M={on:false,g:null,f:null,aF:0,conf:0,lastV:null,lastT:0,hSum:[0,0,0],hN:0};
+function startMotion(){
+  if(M.on)return;
+  if(!('DeviceMotionEvent' in window)){setMot('','Motion sensor not available (GPS only)');return}
+  const go=()=>{addEventListener('devicemotion',onMotion);M.on=true;setMot('warn','Motion: waiting for data…')};
+  if(typeof DeviceMotionEvent.requestPermission==='function')DeviceMotionEvent.requestPermission().then(r=>r==='granted'?go():setMot('bad','Motion permission denied')).catch(()=>setMot('bad','Motion permission denied'));
+  else go();
+}
+function onMotion(e){
+  const a=e.accelerationIncludingGravity;if(!a||a.x==null)return;
+  const v=[a.x,a.y,a.z];
+  if(!M.g)M.g=v.slice();
+  const al=S.speed<.5?.05:.002;for(let i=0;i<3;i++)M.g[i]+=(v[i]-M.g[i])*al;
+  const gn=Math.hypot(...M.g)||9.81,gu=M.g.map(x=>x/gn);
+  const lin=v.map((x,i)=>x-M.g[i]),dv=lin[0]*gu[0]+lin[1]*gu[1]+lin[2]*gu[2];
+  const h=lin.map((x,i)=>x-dv*gu[i]);
+  for(let i=0;i<3;i++)M.hSum[i]+=h[i];M.hN++;
+  if(M.f){const af=h[0]*M.f[0]+h[1]*M.f[1]+h[2]*M.f[2];M.aF+=(af-M.aF)*.15}
+}
+// Learns which way is "forward" by matching sensor acceleration to GPS speed changes. Works with any phone mounting angle.
+function learnForward(v,t){
+  if(M.on&&M.lastV!=null&&M.hN>5){const dt=(t-M.lastT)/1000;
+    if(dt>0&&dt<3){const ag=(v-M.lastV)/dt;
+      if(Math.abs(ag)>.6){const avg=M.hSum.map(x=>x/M.hN),n=Math.hypot(...avg);
+        if(n>.3){const c=avg.map(x=>x/n*Math.sign(ag));
+          if(!M.f)M.f=c;else{M.f=M.f.map((x,i)=>x*.75+c[i]*.25);const m=Math.hypot(...M.f)||1;M.f=M.f.map(x=>x/m)}
+          M.conf=Math.min(10,M.conf+1)}}}}
+  M.lastV=v;M.lastT=t;M.hSum=[0,0,0];M.hN=0;
+}
+let motMsg='';
+function setMot(state,text){if(text===motMsg)return;motMsg=text;$('motDot').className='dot '+state;$('motText').textContent=text}
+const motionLive=()=>opt.src==='gps'&&M.on&&M.conf>=3;
 
 function startupCrank(){
   const c=ctx,t=c.currentTime,o=c.createOscillator(),gg=c.createGain(),f=c.createBiquadFilter();
@@ -357,6 +460,7 @@ function updateAudio(){
   n.gHarm.gain.setTargetAtTime(W?(P.rotary?.06:0):P.rotary?.32+rn*.15:.15,t,.1);
   n.exLp.frequency.setTargetAtTime(Math.min((260+rpm*.35*P.bright)*(.55+th*.9)*(1+v*.5),14000),t,k);
   n.engine.gain.setTargetAtTime(on?(.22+th*.6+rn*.35):0,t,.05);
+  updateSamples(rpm,th,t);
   // block
   n.mech.frequency.setTargetAtTime(f*2,t,k);
   n.gMech.gain.setTargetAtTime(.12+rn*.1,t,.1);
@@ -432,13 +536,18 @@ function update(dt,now){
     S.speed+=(S.simGas?(S.gear<=1?5.5:4.2-S.gear*.35):-1.4)*dt;
     S.speed=clamp(S.speed,0,80);
   }else if(S.gpsSpeed!=null){
-    S.speed+=(S.gpsSpeed-S.speed)*Math.min(1,dt*2.2);
+    if(motionLive()){ // integrate sensor accel for instant response, GPS corrects drift
+      S.speed+=M.aF*dt;S.speed+=(S.gpsSpeed-S.speed)*Math.min(1,dt*.8);
+      if(S.gpsSpeed===0&&Math.abs(M.aF)<.4)S.speed*=Math.max(0,1-dt*4);
+      S.speed=Math.max(0,S.speed);
+    }else S.speed+=(S.gpsSpeed-S.speed)*Math.min(1,dt*2.2);
   }
   const a=(S.speed-S.prevSpeed)/Math.max(dt,1e-3);S.prevSpeed=S.speed;
   S.accel+=(a-S.accel)*Math.min(1,dt*3);
 
   const stopped=S.speed<1.2;
-  let tTh=opt.src==='sim'?(S.simGas?1:0):clamp((S.accel+.15)/2.5);
+  const accIn=motionLive()?M.aF:S.accel;
+  let tTh=opt.src==='sim'?(S.simGas?1:0):clamp((accIn+.15)/2.5);
   if(stopped&&S.revHeld)tTh=1;
   S.throttle+=(tTh-S.throttle)*Math.min(1,dt*(tTh>S.throttle?8:4));
 
@@ -492,7 +601,7 @@ function startGps(){
   watchId=navigator.geolocation.watchPosition(p=>{
     let v=p.coords.speed;
     if(v==null||isNaN(v)){v=0;if(S.lastGps){const dt=(p.timestamp-S.lastGps.t)/1000;if(dt>0)v=hav(S.lastGps.c,p.coords)/dt}}
-    S.lastGps={c:p.coords,t:p.timestamp};S.gpsSpeed=v<.5?0:v;
+    S.lastGps={c:p.coords,t:p.timestamp};S.gpsSpeed=v<.5?0:v;learnForward(S.gpsSpeed,p.timestamp);
     setGps('ok','GPS live · ±'+Math.round(p.coords.accuracy)+' m');
   },e=>setGps('bad',e.code===1?'Location blocked. Allow it for this site, or use Simulator.':'GPS unavailable. Use Simulator.'),
   {enableHighAccuracy:true,maximumAge:0,timeout:15000});
@@ -536,9 +645,12 @@ function selectPreset(k){
   refreshTurbo&&refreshTurbo();save();
 }
 const chipLabel=p=>p.name+(p.rotary?'<small>rotary</small>':'')+(p.vtec?'<small>vtec</small>':'')+(p.turbo?'<small>turbo</small>':'');
-const presetsBy=h=>Object.entries(PRESETS).filter(([,p])=>!!p.honda===h).map(([k,p])=>[k,chipLabel(p)]);
-let refreshA,refreshB;
-const pick=k=>{selectPreset(k);refreshA&&refreshA();refreshB&&refreshB()};
+const presetsBy=h=>Object.entries(PRESETS).filter(([,p])=>!p.rec&&!!p.honda===h).map(([k,p])=>[k,chipLabel(p)]);
+let refreshA,refreshB,refreshC;
+function pick(k){selectPreset(k);refreshA&&refreshA();refreshB&&refreshB();refreshC&&refreshC()}
+function buildRecRow(){refreshC=group('chipsRec',Object.entries(PRESETS).filter(([,p])=>p.rec).map(([k,p])=>[k,p.name+'<small>recorded</small>']),()=>key,pick)}
+$('recFiles').onchange=async e=>{const fs=[...e.target.files];$('recNote').textContent='Loading '+fs.length+' files…';
+  await addRecordings(await Promise.all(fs.map(async f=>({name:f.name,data:await f.arrayBuffer()}))));e.target.value=''};
 refreshA=group('chips',presetsBy(false),()=>key,pick);
 refreshB=group('chipsHonda',presetsBy(true),()=>key,pick);
 refreshTurbo=group('optTurbo',[[false,'Off'],[true,'On']],()=>opt.turbo,v=>{opt.turbo=v;S.boost=0});
@@ -581,9 +693,10 @@ $('startBtn').onclick=()=>{
     nodes.engine.gain.cancelScheduledValues(ctx.currentTime);
     startupCrank();attachWorklet();
   }catch(e){setGps('bad','Audio failed to start: '+e.message)}
-  lockWake();
+  lockWake();startMotion();
   if(opt.src==='gps')startGps();
 };
+loadHostedSamples();
 $('stopBtn').onclick=()=>{S.running=false;S.boost=0;$('overlay').hidden=false};
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&S.running)lockWake()});
 
@@ -592,6 +705,7 @@ function loop(now){
   const dt=Math.min(.1,(now-last)/1000);last=now;
   if(S.running)update(dt,now);
   updateAudio();
+  if(M.on)setMot(M.conf>=3?'ok':'warn',M.conf>=3?'Motion live · instant response':M.hN||M.g?'Motion: learning orientation, drive normally':'Motion: waiting for data…');
   $('speed').textContent=Math.round(S.speed*3.6);
   $('gear').textContent=S.gear===0?'N':S.gear;
   $('rpm').textContent=Math.round(S.rpm/10)*10+' RPM';
