@@ -351,7 +351,7 @@ function makeLoop(buf){
 }
 function rms(b){let s=0,n=0;for(let ch=0;ch<b.numberOfChannels;ch++){const d=b.getChannelData(ch);for(let i=0;i<d.length;i+=4){s+=d[i]*d[i];n++}}return Math.sqrt(s/Math.max(n,1))}
 function parseName(n){const m=n.toLowerCase().replace(/\.[a-z0-9]+$/,'').match(/^(.+?)[_\- ](\d{3,5})[_\- ]?(on|off)$/);return m&&{eng:m[1],rpm:+m[2],mode:m[3]}}
-async function addRecordings(items){ // items: [{name, data:ArrayBuffer}]
+async function addRecordings(items,meta){ // items: [{name, data:ArrayBuffer}]; meta: optional per-engine overrides
   ctx=ctx||makeCtx();
   const by={};
   for(const it of items){const p=parseName(it.name);if(!p)continue;
@@ -362,10 +362,12 @@ async function addRecordings(items){ // items: [{name, data:ArrayBuffer}]
     if(!clips.length)continue;
     const peak=Math.max(...clips.map(c=>rms(c.on)))||1,sc=.22/peak;
     for(const c of clips)for(const b of [c.on,c.off])if(b)for(let ch=0;ch<b.numberOfChannels;ch++){const d=b.getChannelData(ch);for(let i=0;i<d.length;i++)d[i]*=sc}
-    const id='rec_'+eng.replace(/[^a-z0-9]/g,'');
-    const lo=clips[0].rpm,hi=clips[clips.length-1].rpm;
-    PRESETS[id]={name:eng.replace(/[_-]/g,' ').replace(/\b\w/g,c=>c.toUpperCase()),rec:true,cyl:4,idle:Math.max(600,Math.min(lo,1100)),red:hi,
-      gears:[3.3,2.1,1.5,1.15,.92,.76],fd:4.1,lope:0,rasp:.3,bright:1.2,drive:2,turbo:false,spool:.5,layout:'front',sub:.5};
+    const id='rec_'+eng.replace(/[^a-z0-9_]/g,'');
+    const lo=clips[0].rpm,hi=clips[clips.length-1].rpm,m=meta||{};
+    PRESETS[id]={name:m.name||eng.replace(/[_-]/g,' ').replace(/\b\w/g,c=>c.toUpperCase()),rec:true,cyl:m.cyl||4,
+      idle:m.idle!=null?m.idle:Math.max(600,Math.min(lo,1100)),red:m.red!=null?m.red:hi,
+      gears:m.gears||[3.3,2.1,1.5,1.15,.92,.76],fd:m.fd||4.1,lope:0,rasp:.3,bright:1.2,drive:2,turbo:false,spool:.5,
+      layout:m.layout||'front',sub:.5,rotary:!!m.rotary,vtec:m.vtec||0};
     REC[id]=clips;added.push(id);
   }
   buildRecRow();
@@ -390,11 +392,29 @@ function updateSamples(rpm,th,t){
     v.on.src.playbackRate.setTargetAtTime(r,t,.03);v.on.g.gain.setTargetAtTime(g*(v.off?on:1),t,.03);
     if(v.off){v.off.src.playbackRate.setTargetAtTime(r,t,.03);v.off.g.gain.setTargetAtTime(g*off,t,.03)}});
 }
+// Hosted recordings: list engines up front, fetch+decode each engine's clips only when its chip is picked.
+const HOSTED={};
 async function loadHostedSamples(){
   try{const r=await fetch('samples/index.json',{cache:'no-cache'});if(!r.ok)return;const idx=await r.json();
-    const items=[];for(const f of idx.files||[]){const rr=await fetch('samples/'+f);if(rr.ok)items.push({name:f.split('/').pop(),data:await rr.arrayBuffer()})}
-    if(items.length)await addRecordings(items);
+    if(Array.isArray(idx.engines)){
+      for(const e of idx.engines)HOSTED['rec_'+e.id]={name:e.name,files:e.files,meta:e,loaded:false};
+      buildRecRow();
+    }else{ // old flat format: load everything now
+      const items=[];for(const f of idx.files||[]){const rr=await fetch('samples/'+f);if(rr.ok)items.push({name:f.split('/').pop(),data:await rr.arrayBuffer()})}
+      if(items.length)await addRecordings(items);
+    }
   }catch(e){}
+}
+async function loadHostedEngine(id){
+  const H=HOSTED[id];if(!H||H.loaded)return;
+  const chip=document.querySelector(`#chipsRec [data-v="${id}"]`);
+  if(chip)chip.innerHTML=H.name+'<small>loading…</small>';
+  try{
+    const items=[];
+    for(const f of H.files){const rr=await fetch('samples/'+f);if(rr.ok)items.push({name:f.split('/').pop(),data:await rr.arrayBuffer()})}
+    H.loaded=true;
+    await addRecordings(items,H.meta); // registers rec_<id>, rebuilds row, auto-picks
+  }catch(e){H.loaded=false;if(chip)chip.innerHTML=H.name+'<small>tap to load</small>';}
 }
 
 // ---------- motion sensor (phone): instant throttle + speed between GPS fixes ----------
@@ -467,7 +487,7 @@ function updateAudio(){
   n.vBp.frequency.setTargetAtTime(2500+rn*4000,t,k);
   n.gValve.gain.setTargetAtTime((P.rotary?.04:.09)*(.4+rn),t,.1);
   n.blockLp.frequency.setTargetAtTime(1200+rpm*.5,t,k);
-  n.blockLvl.gain.setTargetAtTime(on?(.25+th*.25)*(P.layout==='front'?1:.8)*(1+v*.9):0,t,.08);
+  n.blockLvl.gain.setTargetAtTime(on&&!P.rec?(.25+th*.25)*(P.layout==='front'?1:.8)*(1+v*.9):0,t,.08);
   // sub: strongest at low rpm under load, the way a real engine shakes the cabin
   const bass=$('bass').value/100*P.sub;
   n.s1.frequency.setTargetAtTime(f/2,t,k);
@@ -486,7 +506,7 @@ function updateAudio(){
 function popLvl(){return opt.pops==='loud'?.95:.38}
 // Bangs come out of the exhaust tips, alternating sides.
 function bang(level,delay=0){
-  if(!nodes||opt.pops==='off')return;
+  if(!nodes||opt.pops==='off'||P.rec)return;
   const now=performance.now();if(delay===0&&now-S.lastBang<35)return;S.lastBang=now;
   const c=ctx,t=c.currentTime+delay,dest=(S.tip^=1)?nodes.pTipL:nodes.pTipR;
   const o=c.createOscillator(),og=c.createGain();o.type='sine';
@@ -509,7 +529,7 @@ function popBurst(){
 }
 // Blow-off valve vents from under the hood, front passenger side.
 function bov(level){
-  if(!nodes)return;
+  if(!nodes||P.rec)return;
   const c=ctx,t=c.currentTime,L=clamp(level)*1.1+.05,dest=nodes.turboIn;
   const src=c.createBufferSource();src.buffer=nodes.nbuf;src.loop=true;
   const bp=c.createBiquadFilter();bp.type='bandpass';const g=c.createGain();
@@ -648,7 +668,13 @@ const chipLabel=p=>p.name+(p.rotary?'<small>rotary</small>':'')+(p.vtec?'<small>
 const presetsBy=h=>Object.entries(PRESETS).filter(([,p])=>!p.rec&&!!p.honda===h).map(([k,p])=>[k,chipLabel(p)]);
 let refreshA,refreshB,refreshC;
 function pick(k){selectPreset(k);refreshA&&refreshA();refreshB&&refreshB();refreshC&&refreshC()}
-function buildRecRow(){refreshC=group('chipsRec',Object.entries(PRESETS).filter(([,p])=>p.rec).map(([k,p])=>[k,p.name+'<small>recorded</small>']),()=>key,pick)}
+function pickRec(id){ if(HOSTED[id]&&!HOSTED[id].loaded){loadHostedEngine(id);} else {pick(id);} }
+function buildRecRow(){
+  const items=[];
+  for(const id in HOSTED){const H=HOSTED[id];items.push([id,H.name+'<small>'+(H.loaded?'recorded':'tap to load')+'</small>'])}
+  for(const [k,p] of Object.entries(PRESETS))if(p.rec&&!HOSTED[k])items.push([k,p.name+'<small>recorded</small>']);
+  refreshC=group('chipsRec',items,()=>key,pickRec);
+}
 $('recFiles').onchange=async e=>{const fs=[...e.target.files];$('recNote').textContent='Loading '+fs.length+' files…';
   await addRecordings(await Promise.all(fs.map(async f=>({name:f.name,data:await f.arrayBuffer()}))));e.target.value=''};
 refreshA=group('chips',presetsBy(false),()=>key,pick);
