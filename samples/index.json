@@ -1,3 +1,28 @@
-{
-  "files": []
+﻿{
+    "files":  [
+                  "v8/v8_1000_off.ogg",
+                  "v8/v8_1000_on.ogg",
+                  "v8/v8_1500_off.ogg",
+                  "v8/v8_1500_on.ogg",
+                  "v8/v8_2000_off.ogg",
+                  "v8/v8_2000_on.ogg",
+                  "v8/v8_2500_off.ogg",
+                  "v8/v8_2500_on.ogg",
+                  "v8/v8_3000_off.ogg",
+                  "v8/v8_3000_on.ogg",
+                  "v8/v8_3500_off.ogg",
+                  "v8/v8_3500_on.ogg",
+                  "v8/v8_4000_off.ogg",
+                  "v8/v8_4000_on.ogg",
+                  "v8/v8_4500_off.ogg",
+                  "v8/v8_4500_on.ogg",
+                  "v8/v8_5000_off.ogg",
+                  "v8/v8_5000_on.ogg",
+                  "v8/v8_5500_off.ogg",
+                  "v8/v8_5500_on.ogg",
+                  "v8/v8_6000_off.ogg",
+                  "v8/v8_6000_on.ogg",
+                  "v8/v8_6500_off.ogg",
+                  "v8/v8_6500_on.ogg"
+              ]
 }
