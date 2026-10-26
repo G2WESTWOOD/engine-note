@@ -62,6 +62,15 @@ Your own recordings: "Load your own WAVs…" takes files named `<name>_<rpm>_<on
 - Throttle is inferred from acceleration: steady speed uphill reads as light load.
 - The Tesla browser exposes no pedal or CAN data to web pages, only location.
 
+## Credits
+
+- Engine recordings: captured from [Engine Simulator](https://github.com/ange-yaghi/engine-sim) by AngeTheGreat.
+- Blow-off valve recordings (`samples/bov/pssh_*.wav`): excerpts from
+  ["Loud HKS BOV sound on peugeot 406 turbo"](https://commons.wikimedia.org/wiki/File:Peugeot_406_Turbo_(turbocharged,_HKS_blow-off_valve)_-_engine_and_exhaust_sound_(YouTube_kx0Tvu4_K04).opus)
+  by nick7100 (YouTube), via Wikimedia Commons, licensed
+  [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Changes: four vents cut out, high-pass filtered to remove
+  the engine underneath, faded and level-matched. The "Flutter" valve sound is synthetic.
+
 ## Files
 
 - `index.html`: the whole app.

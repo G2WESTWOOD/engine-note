@@ -89,6 +89,7 @@ input[type=range]{width:100%;accent-color:var(--amber);height:32px}
 .sel:focus-visible{outline:2px solid var(--cool);outline-offset:2px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .note{font-size:.82rem;color:var(--muted);line-height:1.5;margin:0;max-width:62ch}
+.note a{color:var(--cool)}
 .toast{position:fixed;left:50%;top:18px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-family:var(--display);letter-spacing:.1em;text-transform:uppercase;z-index:6;pointer-events:none}
 .overlay{position:fixed;inset:0;background:rgba(10,13,17,.94);display:flex;align-items:center;justify-content:center;z-index:5;padding:16px}
 .overlay .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:26px;max-width:480px;width:100%;display:flex;flex-direction:column;gap:12px}
@@ -191,6 +192,7 @@ input[type=range]{width:100%;accent-color:var(--amber);height:32px}
       <div><div class="label"><label for="sub">Sub bass</label></div><input type="range" id="sub" min="0" max="100"></div>
     </div>
     <p class="note">Surround encodes the exhaust so the car's upmixer sends it to the rear speakers; if it sounds hollow, use Stereo. Keyboard: ↑ gas, ↓ brake, ← → shift, R rev, Space start/stop.</p>
+    <p class="note" id="credits"></p>
   </section>
 </div>
 
@@ -265,7 +267,7 @@ async function loadManifest(){
   try{
     const r=await fetch('samples/index.json',{cache:'no-cache'});if(!r.ok)throw new Error('HTTP '+r.status);
     const j=await r.json();if(!Array.isArray(j.engines)||!j.engines.length)throw new Error('no engines');
-    MAN=j;if(!engMeta(SET.engine))SET.engine=MAN.engines[0].id;loadBov();
+    MAN=j;if(!engMeta(SET.engine))SET.engine=MAN.engines[0].id;loadBov();showCredits();
     $('loadNote').textContent='';
   }catch(e){MAN={engines:[]};$('loadNote').textContent='Could not load the engine list ('+e.message+'). Check the connection and reload.';}
   buildEngineGrid();updateEngineUI();
@@ -438,6 +440,7 @@ const BOVS={pssh:[],flutter:[]};let bovLoaded=false;
 async function loadBov(){
   if(bovLoaded||!MAN||!MAN.bov)return;bovLoaded=true;ensureCtx();
   for(const type of['pssh','flutter'])for(const f of MAN.bov[type]||[]){try{BOVS[type].push(await decode(await(await fetch('samples/'+f)).arrayBuffer()))}catch(e){}}
+  buildBov();
 }
 function bov(level){
   if(!N||!turboOn())return;D.bovLock=.5;D.bovs=(D.bovs||0)+1;
@@ -849,7 +852,15 @@ function buildTrans(){const m=E?E.meta:engMeta(SET.engine);const def=m?TRANS_NAM
   refreshTrans=group('optTrans',[['default','Car default'+(def?'<small>'+def+'</small>':'')],['manual','Manual'],['dct','DCT'],['seq','Sequential'],['auto','Automatic']],()=>SET.trans,v=>{SET.trans=v;save();updateEngineUI()})}
 buildTrans();
 refreshTurbo=group('optTurbo',[['off','Off'],['on','On']],()=>turboOn()?'on':'off',v=>{if(!E)return;SET.turbo[E.id]=v==='on';save();if(v==='off')D.boost=0;else D.boost=Math.min(D.boost,0);updateBoostUI()});
-group('optBov',[['pssh','Pssh'],['flutter','Flutter']],()=>SET.bov,v=>{SET.bov=v;save()});
+function buildBov(){const tag=t=>BOVS[t].length?'<small>recorded</small>':'';
+  group('optBov',[['pssh','Pssh'+tag('pssh')],['flutter','Flutter'+tag('flutter')]],()=>SET.bov,v=>{SET.bov=v;save()})}
+buildBov();
+function showCredits(){   // CC BY credit for third-party recordings, from the manifest
+  const el=$('credits');el.textContent='';if(!MAN||!MAN.credits)return;
+  for(const c of MAN.credits){const s=document.createElement('span');s.append(c.what+': ');
+    const a=document.createElement('a');a.href=c.url;a.textContent=c.source;a.target='_blank';a.rel='noopener';s.append(a,', ');
+    const l=document.createElement('a');l.href=c.license_url;l.textContent=c.license;l.target='_blank';l.rel='noopener';s.append(l,' ('+c.changes+'). ');el.append(s)}
+}
 group('optPops',[['off','Off'],['mild','Mild'],['loud','Loud']],()=>SET.pops,v=>{SET.pops=v;save()});
 group('optField',[['surround','Surround'],['stereo','Stereo']],()=>SET.field,v=>{SET.field=v;placers.forEach(setPlace);save()});
 group('optFeel',[['relaxed','Relaxed'],['normal','Normal'],['aggressive','Aggressive']],()=>SET.feel,v=>{SET.feel=v;save()});

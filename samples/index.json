@@ -627,5 +627,24 @@
    "catch": 1.7,
    "xf": 0.6
   }
+ ],
+ "bov": {
+  "pssh": [
+   "bov/pssh_1.wav",
+   "bov/pssh_2.wav",
+   "bov/pssh_3.wav",
+   "bov/pssh_4.wav"
+  ],
+  "flutter": []
+ },
+ "credits": [
+  {
+   "what": "Blow-off valve recordings (samples/bov/pssh_*.wav)",
+   "source": "Loud HKS BOV sound on peugeot 406 turbo, by nick7100 (YouTube), via Wikimedia Commons",
+   "url": "https://commons.wikimedia.org/wiki/File:Peugeot_406_Turbo_(turbocharged,_HKS_blow-off_valve)_-_engine_and_exhaust_sound_(YouTube_kx0Tvu4_K04).opus",
+   "license": "CC BY 3.0",
+   "license_url": "https://creativecommons.org/licenses/by/3.0/",
+   "changes": "excerpts cut, high-pass filtered to remove the engine, faded and level-matched"
+  }
  ]
 }
