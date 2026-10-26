@@ -85,6 +85,8 @@ canvas{width:100%;height:100%;display:block}
 .chip:focus-visible,.btn:focus-visible,.eng:focus-visible,.sq:focus-visible,input:focus-visible{outline:2px solid var(--cool);outline-offset:2px}
 .opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}
 input[type=range]{width:100%;accent-color:var(--amber);height:32px}
+.sel{width:100%;min-height:44px;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:8px 12px;font:inherit}
+.sel:focus-visible{outline:2px solid var(--cool);outline-offset:2px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .note{font-size:.82rem;color:var(--muted);line-height:1.5;margin:0;max-width:62ch}
 .toast{position:fixed;left:50%;top:18px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-family:var(--display);letter-spacing:.1em;text-transform:uppercase;z-index:6;pointer-events:none}
@@ -103,7 +105,7 @@ input[type=range]{width:100%;accent-color:var(--amber);height:32px}
     <p class="note">Real engines recorded from Engine Simulator, driven through the gears by your speed: clutch, shifts, rev-matching and the limiter.</p>
     <p class="note" id="devNote"></p>
     <ol>
-      <li>In the car's audio settings turn Immersive Sound on (Standard or High) if you have it, and keep balance and fader centred.</li>
+      <li>In the car's audio settings turn Immersive Sound on (Standard or High) if you have it, keep balance and fader centred, and set the EQ flat while you try it.</li>
       <li>Set the volume moderately and keep your eyes on the road.</li>
     </ol>
     <button class="btn primary" id="startBtn" type="button">Start engine</button>
@@ -167,6 +169,10 @@ input[type=range]{width:100%;accent-color:var(--amber);height:32px}
       <div class="chips" id="optFmt"></div>
     </div>
     <div class="opts">
+      <div><div class="label"><label for="trim">Your Tesla</label></div><select id="trim" class="sel"></select></div>
+      <div><div class="label">Gearing <em id="gearNote"></em></div><div class="chips" id="optGearing"></div></div>
+    </div>
+    <div class="opts">
       <div><div class="label">Shifting</div><div class="chips" id="optStyle"></div></div>
       <div><div class="label">Gearbox</div><div class="chips" id="optTrans"></div></div>
     </div>
@@ -200,12 +206,45 @@ const UA=navigator.userAgent||'';
 const DETECTED=/Tesla\/|QtCarBrowser/i.test(UA)?'tesla':(/Android|iPhone|iPad|iPod|Mobile/i.test(UA)||(navigator.maxTouchPoints>1&&/Macintosh/.test(UA)))?'phone':'desktop';
 const DEVICE=['tesla','phone','desktop'].includes(Q.get('device'))?Q.get('device'):DETECTED;
 const DEV_NAME={tesla:'Tesla browser',phone:'Phone',desktop:'Computer'};
-const TIRE=2.15; // tyre circumference, m
+// Teslas: 0-100 km/h (s), top speed (km/h), tyre rolling circumference (m). Used to fit an acceleration curve,
+// scale the pedal (full load = this car's full acceleration) and match each engine's gearing to the car.
+// k = aero drag 0.5*rho*Cd*A/m (1/m)
+const TRIMS={
+  m3_rwd:{name:'Model 3 RWD',t100:6.1,vmax:201,c:2.07,k:1.7e-4}, m3_lr:{name:'Model 3 Long Range',t100:4.4,vmax:201,c:2.07,k:1.7e-4},
+  m3_p:{name:'Model 3 Performance',t100:3.1,vmax:262,c:2.13,k:1.7e-4}, my_rwd:{name:'Model Y RWD',t100:6.9,vmax:217,c:2.21,k:1.8e-4},
+  my_lr:{name:'Model Y Long Range',t100:5.0,vmax:217,c:2.21,k:1.8e-4}, my_p:{name:'Model Y Performance',t100:3.7,vmax:250,c:2.21,k:1.8e-4},
+  ms:{name:'Model S',t100:3.2,vmax:250,c:2.18,k:1.4e-4}, ms_plaid:{name:'Model S Plaid',t100:2.1,vmax:322,c:2.23,k:1.4e-4},
+  mx:{name:'Model X',t100:3.9,vmax:250,c:2.32,k:1.6e-4}, mx_plaid:{name:'Model X Plaid',t100:2.6,vmax:262,c:2.32,k:1.6e-4},
+  ct:{name:'Cybertruck AWD',t100:4.3,vmax:180,c:2.72,k:2.1e-4},
+};
+// acceleration model a(v) = min(a0, P/v) - k v^2 - rolling: a0 = launch (traction) limit, P (W/kg) fitted to the 0-100 time
+const FITS={};
+function fitTrim(id){
+  if(FITS[id])return FITS[id];const T=TRIMS[id]||TRIMS.my_lr,v100=100/3.6,a0=Math.min(14,1.3*v100/T.t100),k=T.k;   // up to ~1.4 g (Plaid)
+  const run=P=>{let v=0,t=0;while(v<v100&&t<30){const a=Math.min(a0,P/Math.max(v,.1))-k*v*v-.1;if(a<=0)return 99;v+=a*.01;t+=.01}return t};
+  let lo=5,hi=3000;for(let i=0;i<40;i++){const mid=(lo+hi)/2;if(run(mid)>T.t100)lo=mid;else hi=mid}
+  return FITS[id]={a0,P:(lo+hi)/2,k};
+}
+const trimAcc=v=>{const F=fitTrim(SET.trim);return Math.min(F.a0,F.P/Math.max(v,.5))};          // full-pedal drive accel
+const roadLoad=v=>v>.05?.1+fitTrim(SET.trim).k*v*v:0;
+// Matched gearing: keep the engine's gear spacing, but pick the final drive so 1st lasts ~1.9 s at this car's full
+// acceleration (a Tesla would otherwise hit the limiter in about a second) and top gear still reaches cruising top speed.
+function gearingFor(m){
+  const T=TRIMS[SET.trim]||TRIMS.my_lr,F=fitTrim(SET.trim),g=m.gears,n=g.length;
+  if(SET.gearing==='original')return{fd:m.fd,tire:T.c};
+  let v=0;for(let t=0;t<1.9;t+=.01)v+=Math.max(0,Math.min(F.a0,F.P/Math.max(v,.1))-F.k*v*v-.1)*.01;
+  const vTop=Math.min(T.vmax,200)/3.6*1.03,v1=Math.max(v,vTop*g[n-1]/g[0],30/3.6);
+  return{fd:m.red*T.c/(60*v1*g[0]),tire:T.c};
+}
 
 // ---------- settings ----------
-const DEF={engine:'v8',fmt:'ogg',src:'auto',style:'sport',trans:'default',bov:'pssh',pops:'off',field:'surround',feel:'normal',units:'bar',vol:70,sub:40,turbo:{},boost:{}};
+const DEF={engine:'v8',fmt:'wav',src:'auto',style:'sport',trans:'default',bov:'pssh',pops:'off',field:'surround',feel:'normal',units:'bar',vol:70,sub:40,
+  trim:'my_lr',gearing:'matched',fmtV:2,turbo:{},boost:{}};
 const SET=JSON.parse(JSON.stringify(DEF));
-try{const s=JSON.parse(localStorage.getItem('en_v4')||'null');if(s&&typeof s==='object')for(const k in DEF)if(s[k]!==undefined&&typeof s[k]===typeof DEF[k])SET[k]=s[k]}catch(e){}
+try{const s=JSON.parse(localStorage.getItem('en_v4')||'null');if(s&&typeof s==='object'){
+  for(const k in DEF)if(s[k]!==undefined&&typeof s[k]===typeof DEF[k])SET[k]=s[k];
+  if(s.fmtV!==2){SET.fmt='wav';SET.fmtV=2}            // one-time switch to lossless WAV for anyone who had the old OGG default
+  if(!TRIMS[SET.trim])SET.trim=DEF.trim}}catch(e){}
 const save=()=>{try{localStorage.setItem('en_v4',JSON.stringify(SET))}catch(e){}};
 const srcEff=()=>SET.src!=='auto'?SET.src:({tesla:'car',phone:'phone',desktop:'sim'})[DEVICE];
 const FEEL={relaxed:.8,normal:1,aggressive:1.35};
@@ -214,7 +253,7 @@ const TRANS_NAME={manual:'Manual',dct:'DCT',seq:'Sequential',auto:'Automatic'};
 // ---------- state ----------
 const D={running:false,starting:0,startT:0,startDur:0,catchAt:0,stopping:0,speed:0,accel:0,demand:0,demandRaw:0,dPrev:0,brake:0,
   loadEff:0,loadSnd:0,Lslow:0,lift:0,rpm:0,gear:0,couple:0,clutch:0,cRamp:0,slip:false,slipRpm:0,shift:null,lastShift:0,paddleUntil:0,
-  cutT:0,limHold:0,limCount:0,lastCut:-1e9,limW:0,boost:0,spool:0,bovLock:0,popLock:0,stopT:0,revT:-1e9,shifts:0};
+  cutT:0,limHold:0,limCount:0,lastCut:-1e9,limW:0,boost:0,shaft:0,spool:0,bovLock:0,popLock:0,stopT:0,revT:-1e9,shifts:0};
 const I={gas:false,brake:false,rev:false};
 
 // ---------- engines (manifest, lazy loading) ----------
@@ -226,7 +265,7 @@ async function loadManifest(){
   try{
     const r=await fetch('samples/index.json',{cache:'no-cache'});if(!r.ok)throw new Error('HTTP '+r.status);
     const j=await r.json();if(!Array.isArray(j.engines)||!j.engines.length)throw new Error('no engines');
-    MAN=j;if(!engMeta(SET.engine))SET.engine=MAN.engines[0].id;
+    MAN=j;if(!engMeta(SET.engine))SET.engine=MAN.engines[0].id;loadBov();
     $('loadNote').textContent='';
   }catch(e){MAN={engines:[]};$('loadNote').textContent='Could not load the engine list ('+e.message+'). Check the connection and reload.';}
   buildEngineGrid();updateEngineUI();
@@ -259,18 +298,24 @@ function placer(c,merger,x,rear){
 function setPlace(p){const phi=(p.x+1)*Math.PI/4;let L=Math.cos(phi),R=Math.sin(phi);
   if(p.rear&&SET.field==='surround')R=-R;if(p.rear&&SET.field==='stereo'){L*=1.12;R*=1.12}
   p.gL.gain.value=L;p.gR.gain.value=R}
+const volGain=()=>SET.vol/100*1.4;   // slider 100 = +3 dB; the limiter and soft clip catch the top end
+function softClip(){const n=4096,c=new Float32Array(n);for(let i=0;i<n;i++){const x=i/(n-1)*2-1,a=Math.abs(x);c[i]=Math.sign(x)*(a<.85?a:.85+.14*Math.tanh((a-.85)/.14))}return c}
 function buildAudio(){
   ensureCtx();if(N)return;const c=ctx;
   const g=v=>{const n=c.createGain();n.gain.value=v;return n};
   const bq=(type,f,q=.707)=>{const n=c.createBiquadFilter();n.type=type;n.frequency.value=f;n.Q.value=q;return n};
   const merger=c.createChannelMerger(2);
-  const mix=g(1),dc=bq('highpass',18),comp=c.createDynamicsCompressor();
+  // output: 30 Hz high-pass (keeps sub-audible rumble off the car's subwoofer) -> gentle compressor -> volume ->
+  // limiter -> soft safety clip, so a fast transient that slips past the limiter can never hard-clip
+  // mix gain +5 dB: a hot, clean signal means the car (or phone over Bluetooth) needs less volume, so less amp/BT hiss
+  const mix=g(1.75),hp=bq('highpass',30,.707),comp=c.createDynamicsCompressor();
   comp.threshold.value=-12;comp.knee.value=8;comp.ratio.value=2.2;comp.attack.value=.008;comp.release.value=.2;
   const verb=c.createConvolver();verb.buffer=cabinIR(c);const wet=g(.12);
-  const out=g(SET.vol/100),lim=c.createDynamicsCompressor();
-  lim.threshold.value=-1.5;lim.knee.value=0;lim.ratio.value=20;lim.attack.value=.002;lim.release.value=.08;
-  merger.connect(mix);mix.connect(dc).connect(comp).connect(out).connect(lim).connect(c.destination);
-  mix.connect(verb).connect(wet).connect(comp);
+  const out=g(volGain()),lim=c.createDynamicsCompressor();
+  lim.threshold.value=-2;lim.knee.value=0;lim.ratio.value=20;lim.attack.value=.002;lim.release.value=.1;
+  const safety=c.createWaveShaper();safety.curve=softClip();safety.oversample='2x';
+  merger.connect(mix);mix.connect(hp).connect(comp).connect(out).connect(lim).connect(safety).connect(c.destination);
+  hp.connect(verb).connect(wet).connect(comp);
   const tipL=placer(c,merger,-.55,true),tipR=placer(c,merger,.55,true),turboIn=placer(c,merger,.4,false),subIn=placer(c,merger,0,false);
   // recorded engine: voices -> engIn -> engFade (start/stop) -> engLvl (normalise, boost) -> two exhaust tips
   const engIn=g(1),engFade=g(0),engLvl=g(0),startG=g(1);
@@ -289,8 +334,8 @@ function buildAudio(){
   const wh1=c.createOscillator(),wh2=c.createOscillator();wh1.start();wh2.start();
   const gWh=g(0);wh1.connect(gWh);wh2.connect(gWh);gWh.connect(turboIn);
   const whoosh=c.createBufferSource();whoosh.buffer=nbuf;whoosh.loop=true;whoosh.start(0,rnd());
-  const wbp=bq('bandpass',1500,.9),gWhoosh=g(0);whoosh.connect(wbp).connect(gWhoosh).connect(turboIn);
-  N={nbuf,engIn,engFade,engLvl,startG,out,subLvl,tipL,tipR,turboIn,subIn,wh1,wh2,gWh,wbp,gWhoosh,startSrc:null};
+  const wbp=bq('bandpass',1500,3),wlp=bq('lowpass',3500),gWhoosh=g(0);whoosh.connect(wbp).connect(wlp).connect(gWhoosh).connect(turboIn);
+  N={nbuf,engIn,engFade,engLvl,startG,out,subLvl,tipL,tipR,turboIn,subIn,wh1,wh2,gWh,wbp,gWhoosh,startSrc:null,mix,comp,lim,safety,verb,wet};
 }
 
 // ---------- recorded engine runtime ----------
@@ -362,13 +407,14 @@ function mixAudio(){
   }
   for(const[key,v]of VO)if(!touched.has(key)&&!v.zero){st(v.g.gain,0,t,.03);v.zero=true}
   st(N.engLvl.gain,E.norm*.95*(1+.14*Math.max(0,D.boost)),t,.05);
-  // turbo
-  const on=turboOn()&&D.running&&D.stopping<=0,s=D.spool,bt=boostTarget();
-  const wf=1600+s*7200+D.rpm*.05;
-  st(N.wh1.frequency,wf,t,.04);st(N.wh2.frequency,wf*1.006+4,t,.04);
-  st(N.gWh.gain,on?Math.pow(s,1.6)*.085*(.35+.65*L):0,t,.04);
-  st(N.wbp.frequency,700+s*2800,t,.05);
-  st(N.gWhoosh.gain,on?Math.max(0,D.boost)/Math.max(.3,bt)*.2*(.3+.7*L):0,t,.05);
+  // turbo: whistle pitch follows the shaft only and its level follows boost (plus a faint whine while the shaft coasts
+  // down); the intake rush is a quiet narrow band, not broadband noise
+  const on=turboOn()&&D.running&&D.stopping<=0,s=D.shaft,bt=boostTarget(),bp=clamp(Math.max(0,D.boost)/bt);
+  const wf=2000+s*s*4200;
+  st(N.wh1.frequency,wf,t,.05);st(N.wh2.frequency,wf*1.012,t,.05);
+  st(N.gWh.gain,on?.015*Math.pow(bp,1.3)+.004*s*s:0,t,.05);
+  st(N.wbp.frequency,900+s*1500,t,.08);
+  st(N.gWhoosh.gain,on?.03*s*s*smooth(L,.05,.6):0,t,.06);
 }
 
 // ---------- synthetic extras: pops & blow-off valve ----------
@@ -386,28 +432,41 @@ function bang(level,delay=0){
   nz.connect(hp).connect(ng).connect(dest);nz.start(t,rnd()*1.5);nz.stop(t+.12);
 }
 function popBurst(){const n=SET.pops==='loud'?3+Math.floor(rnd()*5):1+Math.floor(rnd()*2);let d=0;for(let i=0;i<n;i++){d+=.04+rnd()*.1;bang(popLvl()*(.5+rnd()*.5),d)}}
+// Blow-off valve: real recordings when the manifest lists any ("bov":{"pssh":[...],"flutter":[...]} under samples/),
+// otherwise one of 4 synthetic variants. Every shot gets +-3 % pitch and a level that follows boost; 0.5 s lockout.
+const BOVS={pssh:[],flutter:[]};let bovLoaded=false;
+async function loadBov(){
+  if(bovLoaded||!MAN||!MAN.bov)return;bovLoaded=true;ensureCtx();
+  for(const type of['pssh','flutter'])for(const f of MAN.bov[type]||[]){try{BOVS[type].push(await decode(await(await fetch('samples/'+f)).arrayBuffer()))}catch(e){}}
+}
 function bov(level){
-  if(!N||!turboOn())return;D.bovLock=.5;
-  const c=ctx,t=c.currentTime,L=clamp(level/1.5)*1.1+.06,dest=N.turboIn;
+  if(!N||!turboOn())return;D.bovLock=.5;D.bovs=(D.bovs||0)+1;
+  const c=ctx,t=c.currentTime,j=1+(rnd()*2-1)*.03,L=clamp(level/1.5)*1.1+.06,dest=N.turboIn,rec=BOVS[SET.bov];
+  if(rec&&rec.length){const s=c.createBufferSource();s.buffer=rec[Math.floor(rnd()*rec.length)];s.playbackRate.value=j;
+    const g=c.createGain();g.gain.value=L*.8;s.connect(g).connect(dest);s.start(t);return}
+  const v=Math.floor(rnd()*4);
   const src=c.createBufferSource();src.buffer=N.nbuf;src.loop=true;
   const bp=c.createBiquadFilter();bp.type='bandpass';const g=c.createGain();
   if(SET.bov==='pssh'){
-    const hp=c.createBiquadFilter();hp.type='highpass';hp.frequency.value=600;bp.Q.value=1.6;
-    bp.frequency.setValueAtTime(4500,t);bp.frequency.exponentialRampToValueAtTime(900,t+.55);
-    g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(L,t+.012);g.gain.exponentialRampToValueAtTime(.0001,t+.6);
-    src.connect(hp).connect(bp).connect(g).connect(dest);src.start(t,rnd());src.stop(t+.65);
+    const f0=[4500,3800,5200,4200][v]*j,f1=[900,1150,800,1000][v]*j,dur=[.6,.5,.7,.55][v];
+    const hp=c.createBiquadFilter();hp.type='highpass';hp.frequency.value=600;bp.Q.value=[1.6,2.1,1.3,1.8][v];
+    bp.frequency.setValueAtTime(f0,t);bp.frequency.exponentialRampToValueAtTime(f1,t+dur*.92);
+    g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(L,t+.012);g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+    src.connect(hp).connect(bp).connect(g).connect(dest);src.start(t,rnd());src.stop(t+dur+.05);
   }else{ // compressor surge flutter
-    bp.Q.value=1;bp.frequency.setValueAtTime(1500,t);bp.frequency.exponentialRampToValueAtTime(450,t+.85);
+    const r0=[26,22,30,24][v]*j,r1=[10,8,12,9][v]*j,dur=[.85,.75,.95,.8][v];
+    bp.Q.value=1;bp.frequency.setValueAtTime([1500,1300,1700,1400][v]*j,t);bp.frequency.exponentialRampToValueAtTime([450,400,520,430][v]*j,t+dur);
     const am=c.createGain();am.gain.value=.5;const lfo=c.createOscillator(),depth=c.createGain();lfo.type='square';depth.gain.value=.5;
-    lfo.frequency.setValueAtTime(26,t);lfo.frequency.linearRampToValueAtTime(10,t+.85);lfo.connect(depth).connect(am.gain);
-    g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(L*1.3,t+.02);g.gain.exponentialRampToValueAtTime(.0001,t+.9);
-    src.connect(bp).connect(am).connect(g).connect(dest);lfo.start(t);lfo.stop(t+.95);src.start(t,rnd());src.stop(t+.95);
+    lfo.frequency.setValueAtTime(r0,t);lfo.frequency.linearRampToValueAtTime(r1,t+dur);lfo.connect(depth).connect(am.gain);
+    g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(L*1.3,t+.02);g.gain.exponentialRampToValueAtTime(.0001,t+dur+.05);
+    src.connect(bp).connect(am).connect(g).connect(dest);lfo.start(t);lfo.stop(t+dur+.1);src.start(t,rnd());src.stop(t+dur+.1);
   }
 }
 
 // ---------- drivetrain ----------
-const ratio=k=>E.meta.gears[k-1]*E.meta.fd;
-const lockRpm=k=>k>0?D.speed/TIRE*60*ratio(k):0;
+function gearCfg(){const key=SET.trim+'|'+SET.gearing;if(E.gkey!==key){const g=gearingFor(E.meta);E.fd=g.fd;E.tire=g.tire;E.gkey=key}return E}
+const ratio=k=>E.meta.gears[k-1]*gearCfg().fd;
+const lockRpm=k=>k>0?D.speed/gearCfg().tire*60*ratio(k):0;
 const transType=()=>SET.trans==='default'?(E.meta.trans||'manual'):SET.trans;
 const turboOn=()=>!!E&&(SET.turbo[E.id]!==undefined?SET.turbo[E.id]:!!E.meta.turbo);
 const boostTarget=()=>{if(!E)return 1;const v=SET.boost[E.id];return v!=null?v:(E.meta.boost||.8)};
@@ -433,7 +492,6 @@ function startShift(to){
   D.gear=to;D.lastShift=performance.now();D.shifts++;
   if(up){
     if(SET.pops!=='off'&&D.demand>.55&&(tt==='dct'||tt==='seq'))bang(popLvl()*.8,.01);
-    if(turboOn()&&D.boost>.35&&D.bovLock<=0)bov(D.boost);
   }else if(SET.pops!=='off'&&D.demand<.2&&rnd()<.6)bang(popLvl()*.5,.08);
 }
 // returns the load, clutch engagement and which gear the clutch couples the engine to at this point of the shift
@@ -517,27 +575,38 @@ function engineDyn(dt){
   D.loadSnd=L;D.lift=D.Lslow-L;D.Lslow+=(L-D.Lslow)*Math.min(1,dt/.18);
   D.limW+=((D.limHold&&D.loadEff>.5?1:0)-D.limW)*Math.min(1,dt*10);
 }
+// Simulator: drives with your Tesla's acceleration curve, through the engine's gears; it can't push past the limiter
 function simPhysics(dt){
-  const m=E.meta,g=D.couple,v=D.speed;let a=v>.05?-(.1+.00018*v*v):0;
+  const m=E.meta,g=D.couple,v=D.speed;let a=-roadLoad(v);
   if(g>0&&D.clutch>0){
-    const x=D.rpm/m.red,shape=D.rpm<E.limit*1.01?.55+.45*Math.sin(Math.PI*Math.pow(clamp(x),.9)):.1;  // torque holds to the limiter
-    a+=Math.min(9.5,(m.a1||5)*(ratio(g)/ratio(1))*shape*(1+.5*Math.max(0,D.boost))*D.loadSnd*D.clutch);
+    const x=D.rpm/m.red,shape=.55+.45*Math.sin(Math.PI*Math.pow(clamp(x),.9));
+    // a slipping clutch still passes near-full torque once it bites, so the launch isn't starved
+    if(lockRpm(g)<E.limit*1.005||D.slip)a+=trimAcc(v)*(.8+.2*shape)*(1+.15*Math.max(0,D.boost))*D.loadSnd*clamp(D.clutch*1.6);
     if(D.loadSnd<.05&&D.clutch>.9)a-=.35*(ratio(g)/ratio(1))*(D.rpm/m.red);   // engine braking
   }
   if(v>.05)a-=D.brake*8.5;
   D.speed=Math.max(0,v+a*dt);D.accel+=(a-D.accel)*Math.min(1,dt*8);
 }
+// Turbo, two states: the shaft has inertia and is driven by exhaust flow (rpm x load); the manifold boost follows the
+// shaft (compressor pressure ~ shaft speed^2), capped by the wastegate, and drops to vacuum when the throttle closes.
+const LH={t:new Float64Array(16),v:new Float32Array(16),i:0};
+function loadDrop100(now){let mx=0;for(let k=0;k<16;k++)if(now-LH.t[k]<=100&&LH.v[k]>mx)mx=LH.v[k];return mx-D.loadSnd}
 function turboUpd(dt){
+  const now=performance.now();LH.t[LH.i]=now;LH.v[LH.i]=D.loadSnd;LH.i=(LH.i+1)&15;
   D.bovLock=Math.max(0,D.bovLock-dt);
-  if(!turboOn()){D.boost+=(0-D.boost)*Math.min(1,dt*3);D.spool*=Math.exp(-dt*3);return}
+  if(!turboOn()){D.boost+=(0-D.boost)*Math.min(1,dt*3);D.shaft*=Math.exp(-dt/1.6);D.spool=D.shaft;return}
   const red=E.meta.red,r=D.rpm,L=D.loadSnd,bt=boostTarget();
-  const avail=bt*smooth(r,red*.22,red*(.48+.07*bt)),vac=-(.52+.22*r/red);
-  const target=L>.04?L*avail+(1-L)*vac*.4:vac;
-  const k=target>D.boost?dt*(.35+1.6*(r/red)*L)/(.28+.32*bt):dt*7;
-  D.boost+=(target-D.boost)*Math.min(1,k);
-  const sp=clamp((Math.max(0,D.boost)+.15*r/red)/(bt+.15));
-  D.spool+=(sp-D.spool)*Math.min(1,dt*(sp>D.spool?3:2));
-  if(D.lift>.35&&D.boost>.3&&D.bovLock<=0)bov(D.boost);
+  const flow=clamp(r/red)*(.12+.88*L);                    // exhaust flow
+  const size=.6+.4*bt;                                    // more boost = bigger turbo = spools later and slower
+  const drive=clamp((flow-.08*size)/(.55*size));          // shaft speed this flow can hold
+  const tgt=Math.min(drive,Math.sqrt(1/1.15));            // wastegate holds the shaft where it makes target boost
+  const tau=tgt>D.shaft?(.45+.35*size)/(.35+1.3*flow):1.6; // ~0.6-1.2 s to spool; coasts down slowly on a lift
+  D.shaft+=(tgt-D.shaft)*Math.min(1,dt/tau);
+  const comp=bt*1.15*D.shaft*D.shaft,open=smooth(L,.05,.6),vac=-(.55+.2*r/red);
+  const man=open*Math.min(comp,bt)+(1-open)*vac;
+  D.boost+=(man-D.boost)*Math.min(1,dt/(man>D.boost?.12:.07));
+  D.spool=D.shaft;
+  if(D.boost>.3&&D.bovLock<=0&&loadDrop100(now)>=.6)bov(D.boost);   // throttle dropped >=60 % within 100 ms with boost
 }
 function effects(dt){
   D.popLock=Math.max(0,D.popLock-dt);if(SET.pops==='off')return;const red=E.meta.red;
@@ -563,7 +632,7 @@ function followInput(dt,now){
   }else{D.speed+=(vEst-D.speed)*Math.min(1,dt*4);G.znew=false}
   HIST.push(now,D.speed);
   D.accel+=(aEst-D.accel)*Math.min(1,dt*(motionLive()?12:6));
-  const v=D.speed,aMax=Math.min(5.5,160/Math.max(v,1)),road=.1+.00018*v*v;
+  const v=D.speed,aMax=trimAcc(v),road=.1+fitTrim(SET.trim).k*v*v;     // full load = this Tesla's full acceleration
   let dr=(D.accel+road)/aMax;dr=dr>0?Math.pow(clamp(dr),.7)*FEEL[SET.feel]:0;
   if(v<.3&&D.accel<.2)dr=0;
   D.demandRaw=clamp(dr);
@@ -660,7 +729,7 @@ function startSensors(){const s=srcEff();if(s!=='sim')startGps();if(s==='phone')
 function startSequence(){
   if(!E||!N)return;const t=ctx.currentTime;
   clearVoices(.03);stopStartSrc();
-  Object.assign(D,{running:true,stopping:0,gear:0,clutch:0,shift:null,cutT:0,limHold:0,limW:0,boost:turboOn()?-.6:0,spool:0,rpm:0,slip:false});
+  Object.assign(D,{running:true,stopping:0,gear:0,clutch:0,shift:null,cutT:0,limHold:0,limW:0,boost:turboOn()?-.6:0,shaft:0,spool:0,rpm:0,slip:false});
   const fade=N.engFade.gain;fade.cancelScheduledValues(t);fade.setValueAtTime(0,t);
   if(E.start){
     const s=ctx.createBufferSource();s.buffer=E.start;s.connect(N.startG);s.start(t+.02);N.startSrc=s;
@@ -762,10 +831,19 @@ function updateEngineUI(){
   const m=E?E.meta:engMeta(SET.engine);if(!m){$('engName').textContent=MAN&&!MAN.engines.length?'No engines loaded':'Loading engines…';return}
   const tt=E&&E.id===m.id?transType():(SET.trans==='default'?m.trans:SET.trans);
   $('engName').textContent=`${m.name} · ${m.desc||''} · ${m.gears.length}-speed ${TRANS_NAME[tt]||''}`;
-  buildTrans();if(refreshTurbo)refreshTurbo();updateBoostUI();
+  buildTrans();if(refreshTurbo)refreshTurbo();updateBoostUI();updateGearNote();
 }
 let refreshTrans=null,refreshTurbo=null;
-const refreshFmt=group('optFmt',[['ogg','OGG<small>fast</small>'],['wav','WAV<small>lossless</small>']],()=>SET.fmt,v=>{if(SET.fmt===v)return;SET.fmt=v;save();refreshEngineGrid();if(E&&!USER[E.id])selectEngine(E.id)});
+const refreshFmt=group('optFmt',[['wav','WAV<small>lossless</small>'],['ogg','OGG<small>data saver</small>']],()=>SET.fmt,v=>{if(SET.fmt===v)return;SET.fmt=v;save();refreshEngineGrid();if(E&&!USER[E.id])selectEngine(E.id)});
+// your Tesla: sets the pedal scale (full load = this car's full acceleration), tyre size and matched gearing
+const trimSel=$('trim');for(const[id,T]of Object.entries(TRIMS)){const o=document.createElement('option');o.value=id;o.textContent=T.name;trimSel.appendChild(o)}
+trimSel.value=SET.trim;trimSel.onchange=()=>{SET.trim=trimSel.value;save();updateEngineUI()};
+group('optGearing',[['matched','Matched to car'],['original','Original car']],()=>SET.gearing,v=>{SET.gearing=v;save();updateEngineUI()});
+function updateGearNote(){
+  const m=E?E.meta:engMeta(SET.engine);if(!m){$('gearNote').textContent='';return}
+  const g=gearingFor(m),T=TRIMS[SET.trim],v1=m.red*g.tire/(60*g.fd*m.gears[0])*3.6,cruise=100/3.6/g.tire*60*m.gears[m.gears.length-1]*g.fd;
+  $('gearNote').textContent=`1st to ${Math.round(v1)} km/h · ${Math.round(cruise/10)*10} rpm at 100 km/h`;
+}
 group('optStyle',[['comfort','Comfort'],['sport','Sport'],['track','Track'],['manual','Manual<small>paddles</small>']],()=>SET.style,v=>{SET.style=v;save();toast(v==='manual'?'Shift with ◀ ▶':v+' shifting')});
 function buildTrans(){const m=E?E.meta:engMeta(SET.engine);const def=m?TRANS_NAME[m.trans]:'';
   refreshTrans=group('optTrans',[['default','Car default'+(def?'<small>'+def+'</small>':'')],['manual','Manual'],['dct','DCT'],['seq','Sequential'],['auto','Automatic']],()=>SET.trans,v=>{SET.trans=v;save();updateEngineUI()})}
@@ -787,7 +865,7 @@ function refreshSrcUI(){
   $('devNote').textContent=DEVICE==='tesla'?'Tesla browser detected: speed comes from the car\'s GPS (the browser can\'t read the pedals, so revs follow the car about half a second behind).':DEVICE==='phone'?'Phone detected: GPS plus the motion sensor for instant response. Mount the phone firmly and allow location and motion.':'Computer detected: Simulator mode. Hold Gas to drive through the gears.';
 }
 $('vol').value=SET.vol;$('sub').value=SET.sub;
-$('vol').oninput=e=>{SET.vol=+e.target.value;if(N)N.out.gain.setTargetAtTime(SET.vol/100,ctx.currentTime,.05);save()};
+$('vol').oninput=e=>{SET.vol=+e.target.value;if(N)N.out.gain.setTargetAtTime(volGain(),ctx.currentTime,.05);save()};
 $('sub').oninput=e=>{SET.sub=+e.target.value;if(N)N.subLvl.gain.setTargetAtTime(SET.sub/100*1.4,ctx.currentTime,.05);save()};
 function updateBoostUI(){
   const on=turboOn(),bt=boostTarget(),psi=SET.units==='psi';
@@ -894,6 +972,7 @@ function tick(){
   const now=performance.now(),dt=Math.min(.1,Math.max(.001,(now-lastTick)/1000));lastTick=now;
   if(!E)return;
   try{
+    if(HOLD){Object.assign(D,{running:true,starting:0,stopping:0,rpm:HOLD.rpm,loadSnd:HOLD.load,loadEff:HOLD.load,limW:0});if(HOLD.boost!=null)D.boost=HOLD.boost;if(HOLD.spool!=null)D.spool=D.shaft=HOLD.spool;if(N)mixAudio();return}  // test hook: fixed rpm/load
     if(srcEff()==='sim')simInput(dt);else followInput(dt,now);
     D.dPrev+=(D.demand-D.dPrev)*Math.min(1,dt/.35);
     if(D.running){
@@ -907,8 +986,10 @@ function tick(){
 }
 setInterval(tick,1000/60);
 
-// test hook for smoke tests
-window.EN={D,I,SET,G,M,get E(){return E},get MAN(){return MAN},CACHE,VO,userShift,selectEngine,loadEngine,startSequence,stopEngine,powerToggle,lockRpm,upRpm,dnRpm,transType,turboOn,boostTarget,tick,DEVICE,srcEff};
+// test hooks for smoke tests (hold = freeze the drivetrain at a fixed rpm/load)
+let HOLD=null;
+window.EN={D,I,SET,G,M,get E(){return E},get MAN(){return MAN},get N(){return N},get ctx(){return ctx},CACHE,VO,userShift,selectEngine,loadEngine,startSequence,stopEngine,powerToggle,lockRpm,upRpm,dnRpm,transType,turboOn,boostTarget,tick,DEVICE,srcEff,
+  hold:(rpm,load,o={})=>{HOLD={rpm,load,...o}},unhold:()=>{HOLD=null}};
 
 refreshSrcUI();loadManifest();
 </script>

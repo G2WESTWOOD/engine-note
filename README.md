@@ -28,11 +28,13 @@ The app detects which of the three it is running on. You can override it under S
 | Setting | What it does |
 |---|---|
 | Engine | 13 recorded engines. Each downloads only when picked. |
-| Sound files | **OGG** (fast, about 1–3 MB per engine) or **WAV** (lossless, about 8–18 MB per engine). Same recordings. |
+| Sound files | **WAV** (lossless, default, about 8–18 MB per engine) or **OGG** (data saver, about 1–3 MB per engine). Same recordings. |
+| Your Tesla | Pick your model. It sets the pedal scale (full load = that car's full acceleration), tyre size and matched gearing. |
+| Gearing | **Matched to car** (default): each engine keeps its gear spacing, but the final drive is set so 1st lasts about 2 s at your Tesla's full acceleration and top gear still reaches cruising top speed. **Original car**: the real car's ratios (long gears; a Tesla runs through 1st much faster than the original car). |
 | Shifting | Comfort, Sport, Track (automatic shift points, kickdown, rev-matched downshifts) or Manual (you shift with ◀ ▶). In the automatic modes ◀ ▶ work as paddles for a few seconds. |
 | Gearbox | Car default, Manual (clutch in/out, heel-and-toe), DCT, Sequential or Automatic: changes shift time and feel. |
-| Turbo | On/off per engine. Boost target is set with − / + next to the live boost readout (tap the readout for psi). |
-| Blow-off valve, Pops | Optional extras; off-throttle pops are off by default. |
+| Turbo | On/off per engine. Boost target is set with − / + next to the live boost readout (tap the readout for psi). Two-state model: the turbo shaft has inertia and spools with exhaust flow (rpm × load); boost follows the shaft, capped by the wastegate, and drops to vacuum on a lift while the shaft (and its whistle) winds down. |
+| Blow-off valve, Pops | Optional extras. The valve fires when the throttle drops 60 % within 100 ms with boost (0.5 s lockout), with ±3 % pitch variation. It uses recorded samples if `samples/index.json` lists them under `"bov": {"pssh": [...], "flutter": [...]}`, otherwise synthetic variants. Off-throttle pops are off by default. |
 | Pedal feel | How hard you have to accelerate for full load (car and phone modes). |
 | Sound field, Volume, Sub bass | Surround sends the exhaust to the rear speakers on matrix upmixers. Sub bass is the recording's own low end, centred for the subwoofer. |
 
@@ -50,6 +52,9 @@ Your own recordings: "Load your own WAVs…" takes files named `<name>_<rpm>_<on
 - **Phone.** The accelerometer is projected onto a forward axis learned from GPS speed changes, so mounting angle
   doesn't matter.
 - **Background.** Physics runs on a timer rather than the display refresh, so it keeps going when the screen dims.
+- **Output.** 30 Hz high-pass (keeps sub-audible rumble off the subwoofer), gentle compressor, limiter, then a soft
+  safety clip. The mix runs hot but clean, so the car or phone needs less volume (and adds less hiss).
+- **Testing tip.** Set the car's EQ flat while trying engines.
 
 ## Limits
 
