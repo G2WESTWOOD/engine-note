@@ -229,14 +229,20 @@ function fitTrim(id){
 }
 const trimAcc=v=>{const F=fitTrim(SET.trim);return Math.min(F.a0,F.P/Math.max(v,.5))};          // full-pedal drive accel
 const roadLoad=v=>v>.05?.1+fitTrim(SET.trim).k*v*v:0;
-// Matched gearing: keep the engine's gear spacing, but pick the final drive so 1st lasts ~1.9 s at this car's full
-// acceleration (a Tesla would otherwise hit the limiter in about a second) and top gear still reaches cruising top speed.
+// one-pedal driving: off the pedal a Tesla regen-brakes at up to ~0.22 g, power-limited at speed, and Hold mode
+// blends in the brakes down to a stop
+const regenAcc=v=>v<.05?0:v<1.5?1.4+.53*v:Math.min(2.2,40/v);
+// Matched gearing: the final drive is set so top gear reaches this car's top speed just under the redline. 1st should
+// last at least ~1.9 s at this car's full acceleration (a Tesla would otherwise hit the limiter in about a second);
+// when the engine's gearbox spreads wider than that allows, the ratios are pulled together on the same spacing
+// pattern (each ratio's distance from 1st scaled on a log scale).
 function gearingFor(m){
   const T=TRIMS[SET.trim]||TRIMS.my_lr,F=fitTrim(SET.trim),g=m.gears,n=g.length;
-  if(SET.gearing==='original')return{fd:m.fd,tire:T.c};
+  if(SET.gearing==='original')return{fd:m.fd,tire:T.c,gears:g};
   let v=0;for(let t=0;t<1.9;t+=.01)v+=Math.max(0,Math.min(F.a0,F.P/Math.max(v,.1))-F.k*v*v-.1)*.01;
-  const vTop=Math.min(T.vmax,200)/3.6*1.03,v1=Math.max(v,vTop*g[n-1]/g[0],30/3.6);
-  return{fd:m.red*T.c/(60*v1*g[0]),tire:T.c};
+  const vTop=T.vmax/3.6*1.02,v1=Math.max(v,30/3.6),spread=g[0]/g[n-1],want=vTop/v1;
+  const a=n>1&&want<spread?Math.log(Math.max(want,1.05))/Math.log(spread):1,gs=g.map(r=>g[0]*Math.pow(r/g[0],a));
+  return{fd:m.red*T.c/(60*vTop*gs[n-1]),tire:T.c,gears:gs};
 }
 
 // ---------- settings ----------
@@ -409,14 +415,14 @@ function mixAudio(){
   }
   for(const[key,v]of VO)if(!touched.has(key)&&!v.zero){st(v.g.gain,0,t,.03);v.zero=true}
   st(N.engLvl.gain,E.norm*.95*(1+.14*Math.max(0,D.boost)),t,.05);
-  // turbo: whistle pitch follows the shaft only and its level follows boost (plus a faint whine while the shaft coasts
-  // down); the intake rush is a quiet narrow band, not broadband noise
-  const on=turboOn()&&D.running&&D.stopping<=0,s=D.shaft,bt=boostTarget(),bp=clamp(Math.max(0,D.boost)/bt);
+  // turbo: whistle pitch and level both follow the shaft, so it gets louder as it spools (and fades as it winds down
+  // after a lift), a little more on throttle and with boost; the intake rush is a quiet narrow band, not broadband noise
+  const on=turboOn()&&D.running&&D.stopping<=0,s=D.shaft,bt=boostTarget(),bp=clamp(Math.max(0,D.boost)/bt),open=smooth(L,.05,.6);
   const wf=2000+s*s*4200;
   st(N.wh1.frequency,wf,t,.05);st(N.wh2.frequency,wf*1.012,t,.05);
-  st(N.gWh.gain,on?.015*Math.pow(bp,1.3)+.004*s*s:0,t,.05);
+  st(N.gWh.gain,on?.028*Math.pow(s,2.2)*(.4+.6*open)+.006*Math.pow(bp,1.5):0,t,.05);
   st(N.wbp.frequency,900+s*1500,t,.08);
-  st(N.gWhoosh.gain,on?.03*s*s*smooth(L,.05,.6):0,t,.06);
+  st(N.gWhoosh.gain,on?.035*s*s*open:0,t,.06);
 }
 
 // ---------- synthetic extras: pops & blow-off valve ----------
@@ -467,8 +473,8 @@ function bov(level){
 }
 
 // ---------- drivetrain ----------
-function gearCfg(){const key=SET.trim+'|'+SET.gearing;if(E.gkey!==key){const g=gearingFor(E.meta);E.fd=g.fd;E.tire=g.tire;E.gkey=key}return E}
-const ratio=k=>E.meta.gears[k-1]*gearCfg().fd;
+function gearCfg(){const key=SET.trim+'|'+SET.gearing;if(E.gkey!==key){const g=gearingFor(E.meta);E.fd=g.fd;E.tire=g.tire;E.gears=g.gears;E.gkey=key}return E}
+const ratio=k=>{const c=gearCfg();return c.gears[k-1]*c.fd};
 const lockRpm=k=>k>0?D.speed/gearCfg().tire*60*ratio(k):0;
 const transType=()=>SET.trans==='default'?(E.meta.trans||'manual'):SET.trans;
 const turboOn=()=>!!E&&(SET.turbo[E.id]!==undefined?SET.turbo[E.id]:!!E.meta.turbo);
@@ -585,8 +591,8 @@ function simPhysics(dt){
     const x=D.rpm/m.red,shape=.55+.45*Math.sin(Math.PI*Math.pow(clamp(x),.9));
     // a slipping clutch still passes near-full torque once it bites, so the launch isn't starved
     if(lockRpm(g)<E.limit*1.005||D.slip)a+=trimAcc(v)*(.8+.2*shape)*(1+.15*Math.max(0,D.boost))*D.loadSnd*clamp(D.clutch*1.6);
-    if(D.loadSnd<.05&&D.clutch>.9)a-=.35*(ratio(g)/ratio(1))*(D.rpm/m.red);   // engine braking
   }
+  a-=regenAcc(v)*clamp((.12-D.demand)/.12);   // lift off = regen (one-pedal), whatever gear the engine is in
   if(v>.05)a-=D.brake*8.5;
   D.speed=Math.max(0,v+a*dt);D.accel+=(a-D.accel)*Math.min(1,dt*8);
 }
@@ -641,7 +647,7 @@ function followInput(dt,now){
   D.demandRaw=clamp(dr);
   if(I.rev&&v<1.2)D.demandRaw=1;
   D.demand+=(D.demandRaw-D.demand)*Math.min(1,dt*(D.demandRaw>D.demand?10:7));
-  D.brake+=(clamp(-(D.accel+.3)/4)-D.brake)*Math.min(1,dt*6);
+  D.brake+=(clamp(-(D.accel+road+.9*regenAcc(v))/4)-D.brake)*Math.min(1,dt*6);   // slowing faster than regen = brake pedal
 }
 function simInput(dt){
   const tgt=I.gas||I.rev?1:0;
@@ -844,8 +850,8 @@ trimSel.value=SET.trim;trimSel.onchange=()=>{SET.trim=trimSel.value;save();updat
 group('optGearing',[['matched','Matched to car'],['original','Original car']],()=>SET.gearing,v=>{SET.gearing=v;save();updateEngineUI()});
 function updateGearNote(){
   const m=E?E.meta:engMeta(SET.engine);if(!m){$('gearNote').textContent='';return}
-  const g=gearingFor(m),T=TRIMS[SET.trim],v1=m.red*g.tire/(60*g.fd*m.gears[0])*3.6,cruise=100/3.6/g.tire*60*m.gears[m.gears.length-1]*g.fd;
-  $('gearNote').textContent=`1st to ${Math.round(v1)} km/h · ${Math.round(cruise/10)*10} rpm at 100 km/h`;
+  const g=gearingFor(m),n=g.gears.length,vg=k=>m.red*g.tire/(60*g.fd*g.gears[k])*3.6,cruise=100/3.6/g.tire*60*g.gears[n-1]*g.fd;
+  $('gearNote').textContent=`1st to ${Math.round(vg(0))} km/h · top gear to ${Math.round(vg(n-1))} km/h · ${Math.round(cruise/10)*10} rpm at 100 km/h`;
 }
 group('optStyle',[['comfort','Comfort'],['sport','Sport'],['track','Track'],['manual','Manual<small>paddles</small>']],()=>SET.style,v=>{SET.style=v;save();toast(v==='manual'?'Shift with ◀ ▶':v+' shifting')});
 function buildTrans(){const m=E?E.meta:engMeta(SET.engine);const def=m?TRANS_NAME[m.trans]:'';
