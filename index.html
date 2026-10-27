@@ -4,194 +4,172 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Engine Note</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap">
 <style>
-/* Car-dash layout: gauges left, controls right; stacks on phones. Single dark look by design. */
+/* Retro digital dash: one fixed screen that never scrolls (Tesla browser, phone portrait or landscape, desktop).
+   The cluster is drawn on a canvas; setup lives in a full-screen sheet with tabs, each laid out to fit. */
 :root{
-  --bg:#11151b; --panel:#191f27; --panel2:#1e252e; --line:#2a333e; --fg:#e9e6df; --muted:#8c96a3;
-  --amber:#f2a33a; --red:#e5483b; --cool:#5aa9c9; --green:#4cc38a;
-  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
-  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+  --bg:#010202; --glass:#030606; --panel:#061010; --line:#0f2b27; --fg:#9ff7e4; --muted:#2f8a78;
+  --vfd:#38f5cf; --amber:#ffb12b; --red:#ff3b2f; --green:#6bff63;
+  --mono:"Share Tech Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
   color-scheme:dark;
 }
 [hidden]{display:none!important}
 *{box-sizing:border-box}
-html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;padding:16px;padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
-button{font:inherit;color:inherit}
-.wrap{max-width:1240px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:28px;align-items:start}
-@media (max-width:900px){.wrap{grid-template-columns:1fr;gap:20px}}
-h1{font-family:var(--display);font-weight:700;font-size:1.5rem;letter-spacing:.06em;text-transform:uppercase;margin:0}
-.sub{color:var(--muted);margin:2px 0 0;font-size:.9rem;min-height:1.3em}
-.dash{display:flex;flex-direction:column;gap:12px;min-width:0}
-.leds{display:flex;gap:6px;justify-content:center;height:12px}
-.leds i{flex:1;max-width:38px;border-radius:3px;background:#232b35;transition:background .05s}
-.leds i.g{background:var(--green)}.leds i.y{background:var(--amber)}.leds i.r{background:var(--red)}.leds i.b{background:#4f8dff}
-.tachbox{position:relative;width:100%;max-width:min(470px,54vh);aspect-ratio:1/1;margin:0 auto}
-@media (max-width:900px){.tachbox{max-width:470px}}
-canvas{width:100%;height:100%;display:block}
-.center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;padding-top:8%;gap:2px}
-.gear{font-family:var(--display);font-weight:700;font-size:clamp(3.4rem,12vw,6.6rem);line-height:1;color:var(--amber)}
-.rpm{font-family:var(--mono);font-size:1.15rem;color:var(--fg);font-variant-numeric:tabular-nums}
-.mode{font-family:var(--display);font-size:1rem;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;min-height:1.2em}
-.mode.hot{color:var(--red)}
-.readrow{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center}
-.readout{display:flex;align-items:baseline;gap:8px}
-.speed{font-family:var(--display);font-weight:700;font-size:clamp(3.6rem,10vw,5.6rem);line-height:.9;font-variant-numeric:tabular-nums}
-.unit{font-family:var(--display);font-size:1.3rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
-.boost{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 14px;display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:end;min-width:0}
-.boost .bl{font-family:var(--display);letter-spacing:.14em;color:var(--muted);font-size:.85rem;text-transform:uppercase}
-.boost .bv{font-family:var(--mono);font-weight:600;font-size:clamp(1.9rem,6vw,2.6rem);line-height:1;color:var(--cool);font-variant-numeric:tabular-nums;cursor:pointer;background:none;border:0;padding:0;text-align:left}
-.boost .bu{font-family:var(--display);color:var(--muted);font-size:1rem;text-transform:uppercase;align-self:end}
-.bbar{grid-column:1/-1;position:relative;height:8px;background:#232b35;border-radius:4px;overflow:hidden;margin-top:6px}
-.bbar i{position:absolute;top:0;bottom:0;left:0;background:var(--cool);width:0}
-.bbar b{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--fg)}
-.bbar u{position:absolute;top:0;bottom:0;width:1px;background:var(--muted)}
-.btgt{grid-column:1/-1;display:flex;align-items:center;gap:8px;margin-top:6px}
-.btgt span{flex:1;text-align:center;font-family:var(--mono);font-size:.9rem;color:var(--muted)}
-.sq{width:44px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);font-size:1.3rem;cursor:pointer}
-.boost.off .bv{color:var(--muted)}
-.tele{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;font-family:var(--display);font-size:.85rem;letter-spacing:.12em;color:var(--muted)}
-.tele .bar{height:8px;background:#232b35;border-radius:4px;overflow:hidden}
-.tele .bar i{display:block;height:100%;width:0;background:var(--amber)}
-.tele .bar.clu i{background:var(--cool)}.tele .bar.brk i{background:var(--red)}
-.drive{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
-.btn{font-weight:600;border-radius:12px;border:1px solid var(--line);background:var(--panel);padding:12px 8px;min-height:58px;cursor:pointer;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;font-family:var(--display);font-size:1.15rem;letter-spacing:.08em;text-transform:uppercase}
-.btn.primary{background:var(--amber);border-color:var(--amber);color:#1a1206}
-.btn.held{background:var(--red);border-color:var(--red);color:#fff}
-.btn.gas.held{background:var(--green);border-color:var(--green);color:#06150d}
-.btn small{display:block;font-family:var(--body);font-size:.68rem;letter-spacing:.04em;text-transform:none;color:var(--muted);font-weight:500}
-.btn.held small,.btn.primary small{color:inherit;opacity:.8}
-.status{display:flex;align-items:center;gap:8px;font-size:.88rem;color:var(--muted);min-height:1.3em}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
-.dot.ok{background:var(--green)}.dot.warn{background:var(--amber)}.dot.bad{background:var(--red)}
-.side{display:flex;flex-direction:column;gap:18px;min-width:0}
-.label{font-size:.72rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:8px;display:flex;justify-content:space-between;gap:8px}
-.label em{font-style:normal;text-transform:none;letter-spacing:0}
-.engs{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
-.eng{position:relative;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px 10px;cursor:pointer;min-height:64px;display:flex;flex-direction:column;gap:2px}
-.eng .en{font-weight:600;font-size:.98rem;padding-right:4px}
-.eng .ed{font-size:.75rem;color:var(--muted);line-height:1.3}
-.eng .eb{font-family:var(--display);font-size:.72rem;letter-spacing:.1em;color:var(--muted);margin-top:4px}
-.eng[aria-pressed="true"]{border-color:var(--amber)}
-.eng[aria-pressed="true"] .en,.eng[aria-pressed="true"] .eb{color:var(--amber)}
-.eng.loading .eb{color:var(--cool)}.eng.err .eb{color:var(--red)}
-.chips{display:flex;flex-wrap:wrap;gap:8px}
-.chip{font-weight:500;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:9px 15px;cursor:pointer;min-height:44px}
-.chip small{color:var(--muted);font-size:.72rem;margin-left:6px;text-transform:uppercase;letter-spacing:.06em}
-.chip[aria-pressed="true"]{border-color:var(--amber);color:var(--amber)}
-.chip[aria-pressed="true"] small{color:var(--amber)}
-.chip:focus-visible,.btn:focus-visible,.eng:focus-visible,.sq:focus-visible,input:focus-visible{outline:2px solid var(--cool);outline-offset:2px}
-.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}
-input[type=range]{width:100%;accent-color:var(--amber);height:32px}
-.sel{width:100%;min-height:44px;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:8px 12px;font:inherit}
-.sel:focus-visible{outline:2px solid var(--cool);outline-offset:2px}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.note{font-size:.82rem;color:var(--muted);line-height:1.5;margin:0;max-width:62ch}
-.note a{color:var(--cool)}
-.toast{position:fixed;left:50%;top:18px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-family:var(--display);letter-spacing:.1em;text-transform:uppercase;z-index:6;pointer-events:none}
-.overlay{position:fixed;inset:0;background:rgba(10,13,17,.94);display:flex;align-items:center;justify-content:center;z-index:5;padding:16px}
-.overlay .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:26px;max-width:480px;width:100%;display:flex;flex-direction:column;gap:12px}
-.overlay h2{font-family:var(--display);font-size:2rem;margin:0;text-transform:uppercase;letter-spacing:.04em}
-.overlay ol{margin:0;padding-left:20px;color:var(--muted);font-size:.86rem;line-height:1.6}
-.overlay .btn{min-height:56px;font-size:1.3rem}
-@media (max-width:420px){.drive{grid-template-columns:repeat(3,minmax(0,1fr))}.readrow{grid-template-columns:1fr}}
+html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:clamp(13px,calc(1vmin + 8px),19px);
+  -webkit-tap-highlight-color:transparent;text-transform:uppercase;letter-spacing:.06em}
+button,select,input{font:inherit;color:inherit;letter-spacing:inherit}
+button{text-transform:inherit}
+.glow{text-shadow:0 0 6px rgba(56,245,207,.55)}
+
+.app{position:fixed;inset:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;gap:clamp(4px,.9vmin,8px);
+  padding:max(6px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))}
+.top{display:flex;gap:clamp(4px,.9vmin,8px);min-width:0}
+.btn{background:var(--panel);border:1px solid var(--line);border-radius:10px;color:var(--fg);cursor:pointer;
+  min-height:clamp(46px,8vmin,68px);padding:.2em .6em;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;line-height:1.05}
+.btn small{font-size:.62em;color:var(--muted)}
+.btn:active{border-color:var(--vfd)}
+.btn.held{background:#2a0b08;border-color:var(--red);color:var(--red)}
+.btn.gas.held{background:#08240c;border-color:var(--green);color:var(--green)}
+.btn.held small{color:inherit}
+.btn.power{color:var(--amber);border-color:#4a3510}
+.engbtn{flex:1;min-width:0;flex-direction:row;justify-content:flex-start;gap:.7em;text-align:left;padding:.2em .8em}
+.engbtn .k{color:var(--muted);flex:none}
+.engbtn #engName{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0}
+.cluster{position:relative;min-height:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+  background:radial-gradient(120% 90% at 50% 40%,#061312 0%,#020505 60%,#010202 100%)}
+.cluster canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.cluster::after{content:"";position:absolute;inset:0;pointer-events:none;border-radius:14px;
+  background:repeating-linear-gradient(to bottom,rgba(0,0,0,.2) 0 1px,transparent 1px 3px),
+             linear-gradient(160deg,rgba(255,255,255,.035) 0%,transparent 35%)}
+.status{display:flex;gap:1.4em;white-space:nowrap;overflow:hidden;font-size:.86em;color:var(--muted);min-height:1.2em;padding:0 .3em}
+.status>span{display:flex;align-items:center;gap:.45em;min-width:0;overflow:hidden}
+.status>span>span:last-child{overflow:hidden;text-overflow:ellipsis}
+.dot{width:.62em;height:.62em;border-radius:2px;background:#123;flex:none}
+.dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}.dot.warn{background:var(--amber);box-shadow:0 0 6px var(--amber)}.dot.bad{background:var(--red);box-shadow:0 0 6px var(--red)}
+.controls{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:clamp(4px,.9vmin,8px)}
+
+/* setup sheet */
+.sheet{position:fixed;inset:0;z-index:4;background:var(--bg);display:grid;grid-template-rows:auto minmax(0,1fr);gap:clamp(6px,1.2vmin,12px);
+  padding:max(6px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))}
+.tabs{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:clamp(4px,.9vmin,8px)}
+.tabs .btn{min-height:clamp(38px,6.5vmin,56px)}
+.tabs .btn[aria-selected="true"]{border-color:var(--vfd);color:var(--vfd);box-shadow:inset 0 -3px 0 var(--vfd)}
+.page{min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:clamp(6px,1.6vh,16px)}
+.field{display:grid;grid-template-columns:8.5em minmax(0,1fr);gap:.35em 1em;align-items:center}
+.field>.lbl{color:var(--muted);font-size:.86em}
+.field>.lbl em{display:block;font-style:normal;text-transform:none;letter-spacing:0;font-size:.9em}
+@media (max-aspect-ratio:1/1){.field{grid-template-columns:minmax(0,1fr)}.field>.lbl em{display:inline;margin-left:.6em}}
+.chips{display:flex;flex-wrap:wrap;gap:clamp(4px,.8vmin,8px);align-items:center}
+.chip{background:var(--panel);border:1px solid var(--line);border-radius:8px;cursor:pointer;padding:.35em .8em;min-height:clamp(34px,5.6vmin,48px)}
+.chip small{color:var(--muted);font-size:.7em;margin-left:.5em}
+.chip[aria-pressed="true"]{border-color:var(--vfd);color:var(--vfd);text-shadow:0 0 6px rgba(56,245,207,.55)}
+.chip[aria-pressed="true"] small{color:var(--vfd)}
+.chip:focus-visible,.btn:focus-visible,.eng:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--vfd);outline-offset:2px}
+.sel{min-height:clamp(34px,5.6vmin,48px);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.3em .6em;max-width:100%;text-transform:none}
+input[type=range]{width:100%;accent-color:var(--vfd);height:clamp(28px,5vmin,40px);margin:0}
+.boostrow{display:flex;align-items:center;gap:.5em}
+.boostrow .chip{min-width:2.6em;font-size:1.1em}
+.boostrow span{min-width:5.5em;text-align:center;color:var(--vfd)}
+.engs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:clamp(4px,.9vmin,8px)}
+@media (max-aspect-ratio:1/1){.engs{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.eng{background:var(--panel);border:1px solid var(--line);border-radius:10px;cursor:pointer;text-align:left;padding:.6em .8em;
+  display:flex;flex-direction:column;justify-content:center;gap:.25em;min-width:0;min-height:clamp(52px,9vmin,84px)}
+.eng span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.eng .en{font-size:1.08em}
+.eng .ed{font-size:.78em;color:var(--muted);text-transform:none;letter-spacing:0}
+.eng .eb{font-size:.72em;color:var(--muted)}
+.eng[aria-pressed="true"]{border-color:var(--vfd);color:var(--vfd);box-shadow:inset 0 0 12px rgba(56,245,207,.12)}
+.eng[aria-pressed="true"] .eb{color:var(--vfd)}
+.eng.loading .eb{color:var(--amber)}.eng.err .eb{color:var(--red)}
+.note{font-size:.72em;color:var(--muted);line-height:1.45;margin:0;text-transform:none;letter-spacing:.02em}
+.note a{color:var(--vfd)}
+.toast{position:fixed;left:50%;top:max(10px,env(safe-area-inset-top));transform:translateX(-50%);background:var(--panel);border:1px solid var(--vfd);
+  color:var(--vfd);border-radius:8px;padding:.4em .9em;z-index:6;pointer-events:none}
+
+/* start card */
+.overlay{position:fixed;inset:0;background:rgba(1,2,2,.96);display:flex;align-items:center;justify-content:center;z-index:5;padding:12px}
+.overlay .card{background:var(--glass);border:1px solid var(--line);border-radius:14px;padding:clamp(14px,3vmin,26px);max-width:520px;width:100%;
+  display:flex;flex-direction:column;gap:clamp(6px,1.4vmin,12px);max-height:100%;overflow:hidden}
+.overlay h2{margin:0;font-weight:400;font-size:2em;color:var(--vfd);letter-spacing:.12em}
+.overlay ol{margin:0;padding-left:1.3em;color:var(--muted);font-size:.74em;line-height:1.5;text-transform:none;letter-spacing:.02em}
+.overlay .btn{min-height:clamp(44px,8vmin,60px);font-size:1.2em;color:var(--amber);border-color:#4a3510}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
 <div class="overlay" id="overlay">
   <div class="card">
-    <h2>Engine Note</h2>
-    <p class="note">Real engines recorded from Engine Simulator, driven through the gears by your speed: clutch, shifts, rev-matching and the limiter.</p>
+    <h2 class="glow">Engine Note</h2>
+    <p class="note">Real engines recorded in Engine Simulator while driving through the gears, played by your speed: clutch, shifts, rev-matching and the limiter.</p>
     <p class="note" id="devNote"></p>
     <ol>
       <li>In the car's audio settings turn Immersive Sound on (Standard or High) if you have it, keep balance and fader centred, and set the EQ flat while you try it.</li>
       <li>Set the volume moderately and keep your eyes on the road.</li>
     </ol>
-    <button class="btn primary" id="startBtn" type="button">Start engine</button>
+    <button class="btn" id="startBtn" type="button">Start engine</button>
     <p class="note" id="loadNote"></p>
   </div>
 </div>
 <div class="toast" id="toast" hidden></div>
 
-<div class="wrap">
-  <section class="dash" aria-label="Gauges">
-    <div>
-      <h1>Engine Note</h1>
-      <p class="sub" id="engName">Loading engines…</p>
-    </div>
-    <div class="leds" id="leds" aria-hidden="true"></div>
-    <div class="tachbox">
-      <canvas id="tach" width="1000" height="1000" aria-label="Tachometer"></canvas>
-      <div class="center"><div class="gear" id="gear">N</div><div class="rpm" id="rpm">0 RPM</div><div class="mode" id="modeTag"></div></div>
-    </div>
-    <div class="readrow">
-      <div class="readout"><div class="speed" id="speed">0</div><div class="unit">km/h</div></div>
-      <div class="boost" id="boostBox">
-        <div class="bl">Boost <span id="turboTag"></span></div><div></div>
-        <button class="bv" id="bval" type="button" title="Tap to switch bar / psi">+0.00</button><div class="bu" id="bunit">bar</div>
-        <div class="bbar"><u id="bzero"></u><i id="bfill"></i><b id="btgt"></b></div>
-        <div class="btgt"><button class="sq" id="bminus" type="button" aria-label="Less boost">−</button><span id="btxt">Target 1.0 bar</span><button class="sq" id="bplus" type="button" aria-label="More boost">+</button></div>
-      </div>
-    </div>
-    <div class="tele" aria-label="Pedals">
-      <span>THR</span><div class="bar"><i id="tThr"></i></div>
-      <span>CLU</span><div class="bar clu"><i id="tClu"></i></div>
-      <span>BRK</span><div class="bar brk"><i id="tBrk"></i></div>
-    </div>
-    <div class="drive">
-      <button class="btn" id="downBtn" type="button">◀ Down<small>shift</small></button>
-      <button class="btn" id="brakeBtn" type="button">Brake<small>hold</small></button>
-      <button class="btn gas" id="gasBtn" type="button">Gas<small>hold</small></button>
-      <button class="btn" id="upBtn" type="button">Up ▶<small>shift</small></button>
-      <button class="btn" id="revBtn" type="button">Rev<small>when stopped</small></button>
-    </div>
-    <div>
-      <div class="status"><span class="dot ok" id="srcDot"></span><span id="srcText"></span></div>
-      <div class="status"><span class="dot" id="gpsDot"></span><span id="gpsText">GPS off</span></div>
-      <div class="status" id="motRow" hidden><span class="dot" id="motDot"></span><span id="motText">Motion sensor off</span></div>
-    </div>
-    <div class="row"><button class="btn" id="powerBtn" type="button" style="flex:1">Start engine</button></div>
-  </section>
+<div class="app">
+  <header class="top">
+    <button class="btn engbtn" id="engPick" type="button" title="Change engine"><span class="k">Engine ▸</span><span id="engName">Loading engines…</span></button>
+    <button class="btn" id="setBtn" type="button">Setup</button>
+  </header>
+  <main class="cluster" aria-label="Gauges"><canvas id="cluster" aria-label="Instrument cluster"></canvas></main>
+  <div class="status" aria-live="polite">
+    <span><span class="dot ok" id="srcDot"></span><span id="srcText"></span></span>
+    <span><span class="dot" id="gpsDot"></span><span id="gpsText">GPS off</span></span>
+    <span id="motRow" hidden><span class="dot" id="motDot"></span><span id="motText">Motion sensor off</span></span>
+  </div>
+  <nav class="controls" aria-label="Controls">
+    <button class="btn" id="downBtn" type="button">◀<small>Down</small></button>
+    <button class="btn" id="brakeBtn" type="button">Brake<small>hold</small></button>
+    <button class="btn gas" id="gasBtn" type="button">Gas<small>hold</small></button>
+    <button class="btn" id="upBtn" type="button">▶<small>Up</small></button>
+    <button class="btn" id="revBtn" type="button">Rev<small>stopped</small></button>
+    <button class="btn power" id="powerBtn" type="button">Start</button>
+  </nav>
+</div>
 
-  <section class="side" aria-label="Settings">
-    <div>
-      <div class="label">Engine <em id="engCount"></em></div>
-      <div class="engs" id="engines"></div>
-      <div class="row" style="margin-top:10px">
-        <label class="chip" for="userFiles">Load your own WAVs…</label>
-        <input type="file" id="userFiles" accept=".wav,.ogg,.mp3,.flac,audio/*" multiple hidden>
-        <span class="note" id="userNote">Name them like myv8_3000_on.wav and myv8_3000_off.wav (optional myv8_idle / _start / _limiter).</span>
-      </div>
-    </div>
-    <div>
-      <div class="label">Sound files <em id="fmtNote"></em></div>
-      <div class="chips" id="optFmt"></div>
-    </div>
-    <div class="opts">
-      <div><div class="label"><label for="trim">Your Tesla</label></div><select id="trim" class="sel"></select></div>
-      <div><div class="label">Gearing <em id="gearNote"></em></div><div class="chips" id="optGearing"></div></div>
-    </div>
-    <div class="opts">
-      <div><div class="label">Shifting</div><div class="chips" id="optStyle"></div></div>
-      <div><div class="label">Gearbox</div><div class="chips" id="optTrans"></div></div>
-    </div>
-    <div class="opts">
-      <div><div class="label">Turbo</div><div class="chips" id="optTurbo"></div></div>
-      <div><div class="label">Blow-off valve</div><div class="chips" id="optBov"></div></div>
-      <div><div class="label">Pops &amp; bangs</div><div class="chips" id="optPops"></div></div>
-    </div>
-    <div class="opts">
-      <div><div class="label">Speed data</div><div class="chips" id="optSrc"></div></div>
-      <div><div class="label">Pedal feel</div><div class="chips" id="optFeel"></div></div>
-    </div>
-    <div class="opts">
-      <div><div class="label">Sound field</div><div class="chips" id="optField"></div></div>
-      <div><div class="label"><label for="vol">Volume</label></div><input type="range" id="vol" min="0" max="100"></div>
-      <div><div class="label"><label for="sub">Sub bass</label></div><input type="range" id="sub" min="0" max="100"></div>
-    </div>
-    <p class="note">Surround encodes the exhaust so the car's upmixer sends it to the rear speakers; if it sounds hollow, use Stereo. Keyboard: ↑ gas, ↓ brake, ← → shift, R rev, Space start/stop.</p>
+<div class="sheet" id="sheet" hidden>
+  <div class="tabs" role="tablist">
+    <button class="btn" type="button" role="tab" data-tab="engine">Engine</button>
+    <button class="btn" type="button" role="tab" data-tab="car">Car</button>
+    <button class="btn" type="button" role="tab" data-tab="drive">Drive</button>
+    <button class="btn" type="button" role="tab" data-tab="sound">Sound</button>
+    <button class="btn" type="button" id="sheetClose" aria-label="Close setup">✕ Close</button>
+  </div>
+  <section class="page" data-page="engine">
+    <div class="engs" id="engines"></div>
+    <div class="field"><div class="lbl">Sound files<em id="fmtNote"></em></div><div class="chips" id="optFmt"></div></div>
+    <div class="field"><div class="lbl">Your own <em id="engCount"></em></div>
+      <div class="chips"><label class="chip" for="userFiles">Load WAVs…</label><input type="file" id="userFiles" accept=".wav,.ogg,.mp3,.flac,audio/*" multiple hidden>
+      <span class="note" id="userNote">Name them like myv8_3000_on.wav and myv8_3000_off.wav (optional myv8_idle / _start / _limiter).</span></div></div>
+  </section>
+  <section class="page" data-page="car" hidden>
+    <div class="field"><div class="lbl"><label for="trim">Your Tesla</label></div><div><select id="trim" class="sel"></select></div></div>
+    <div class="field"><div class="lbl">Gearing<em id="gearNote"></em></div><div class="chips" id="optGearing"></div></div>
+    <div class="field"><div class="lbl">Speed data</div><div class="chips" id="optSrc"></div></div>
+    <div class="field"><div class="lbl">Pedal feel</div><div class="chips" id="optFeel"></div></div>
+  </section>
+  <section class="page" data-page="drive" hidden>
+    <div class="field"><div class="lbl">Shifting</div><div class="chips" id="optStyle"></div></div>
+    <div class="field"><div class="lbl">Gearbox</div><div class="chips" id="optTrans"></div></div>
+    <div class="field"><div class="lbl">Turbo</div><div class="chips"><span class="chips" id="optTurbo"></span>
+      <span class="boostrow"><button class="chip" id="bminus" type="button" aria-label="Less boost">−</button><span id="btxt">1.0 bar</span><button class="chip" id="bplus" type="button" aria-label="More boost">+</button></span>
+      <span class="chips" id="optUnits"></span></div></div>
+    <div class="field"><div class="lbl">Blow-off valve</div><div class="chips" id="optBov"></div></div>
+    <div class="field"><div class="lbl">Pops &amp; bangs</div><div class="chips" id="optPops"></div></div>
+  </section>
+  <section class="page" data-page="sound" hidden>
+    <div class="field"><div class="lbl">Sound field</div><div class="chips" id="optField"></div></div>
+    <div class="field"><div class="lbl"><label for="vol">Volume</label></div><input type="range" id="vol" min="0" max="100"></div>
+    <div class="field"><div class="lbl"><label for="sub">Sub bass</label></div><input type="range" id="sub" min="0" max="100"></div>
+    <p class="note">Surround encodes the exhaust so the car's upmixer sends it to the rear speakers; if it sounds hollow, use Stereo. Keyboard: ↑ gas, ↓ brake, ← → shift, R rev, Space start/stop, Esc closes this.</p>
     <p class="note" id="credits"></p>
   </section>
 </div>
@@ -746,7 +724,7 @@ function startSequence(){
     fade.setValueAtTime(0,t+Math.max(.05,dur-xf));fade.linearRampToValueAtTime(1,t+dur+.02);
     D.starting=D.startDur=dur;D.startT=0;D.catchAt=clamp(E.catchAt!=null?E.catchAt:dur*.4,.15,Math.max(.2,dur-.3));
   }else{fade.linearRampToValueAtTime(1,t+.5);D.starting=D.startDur=.5;D.startT=0;D.catchAt=.05}
-  $('powerBtn').textContent='Engine off';
+  $('powerBtn').textContent='Stop';
 }
 function startAnim(dt){
   D.startT+=dt;D.starting-=dt;const idle=E.meta.idle,t=D.startT;
@@ -759,7 +737,7 @@ function stopEngine(){
   if(!D.running||!N||D.stopping>0)return;const t=ctx.currentTime;
   D.stopping=.9;D.starting=0;stopStartSrc();
   const g=N.engFade.gain;g.cancelScheduledValues(t);g.setValueAtTime(g.value,t);g.linearRampToValueAtTime(0,t+.9);
-  $('powerBtn').textContent='Start engine';
+  $('powerBtn').textContent='Start';
 }
 function stopAnim(dt){
   D.stopping-=dt;D.rpm=Math.max(0,D.rpm-dt*Math.max(E.meta.idle*1.3,D.rpm*2.5));D.loadSnd=D.loadEff=0;D.gear=0;D.clutch=0;D.shift=null;
@@ -825,8 +803,8 @@ function buildEngineGrid(){
   for(const m of list){const b=document.createElement('button');b.type='button';b.className='eng';b.dataset.id=m.id;
     b.innerHTML='<span class="en"></span><span class="ed"></span><span class="eb"></span>';
     b.querySelector('.en').textContent=m.name;b.querySelector('.ed').textContent=m.desc||'';
-    b.onclick=()=>selectEngine(m.id);el.appendChild(b)}
-  $('engCount').textContent=list.length?list.length+' recorded':'';
+    b.onclick=()=>{selectEngine(m.id);$('sheet').hidden=true};el.appendChild(b)}
+  $('engCount').textContent=list.length?list.length+' engines':'';
   refreshEngineGrid();
 }
 function refreshEngineGrid(){
@@ -842,7 +820,7 @@ function updateEngineUI(){
   $('engName').textContent=`${m.name} · ${m.desc||''} · ${m.gears.length}-speed ${TRANS_NAME[tt]||''}`;
   buildTrans();if(refreshTurbo)refreshTurbo();updateBoostUI();updateGearNote();
 }
-let refreshTrans=null,refreshTurbo=null;
+let refreshTrans=null,refreshTurbo=null,refreshUnits=null;
 const refreshFmt=group('optFmt',[['wav','WAV<small>lossless</small>'],['ogg','OGG<small>data saver</small>']],()=>SET.fmt,v=>{if(SET.fmt===v)return;SET.fmt=v;save();refreshEngineGrid();if(E&&!USER[E.id])selectEngine(E.id)});
 // your Tesla: sets the pedal scale (full load = this car's full acceleration), tyre size and matched gearing
 const trimSel=$('trim');for(const[id,T]of Object.entries(TRIMS)){const o=document.createElement('option');o.value=id;o.textContent=T.name;trimSel.appendChild(o)}
@@ -886,14 +864,23 @@ $('vol').oninput=e=>{SET.vol=+e.target.value;if(N)N.out.gain.setTargetAtTime(vol
 $('sub').oninput=e=>{SET.sub=+e.target.value;if(N)N.subLvl.gain.setTargetAtTime(SET.sub/100*1.4,ctx.currentTime,.05);save()};
 function updateBoostUI(){
   const on=turboOn(),bt=boostTarget(),psi=SET.units==='psi';
-  $('boostBox').classList.toggle('off',!on);$('turboTag').textContent=on?'':'· off';
-  $('bunit').textContent=psi?'psi':'bar';
-  $('btxt').textContent=on?'Target '+(psi?(bt*14.5038).toFixed(0)+' psi':bt.toFixed(1)+' bar'):'Turbo off · tap + to fit one';
+  $('btxt').textContent=on?(psi?(bt*14.5038).toFixed(0)+' psi':bt.toFixed(1)+' bar'):'Off';
+  if(refreshUnits)refreshUnits();
 }
 const stepBoost=dir=>{if(!E)return;if(!turboOn()){if(dir>0){SET.turbo[E.id]=true;refreshTurbo();save();updateBoostUI()}return}
   const v=Math.round(clamp(boostTarget()+dir*.1,.3,2.5)*10)/10;SET.boost[E.id]=v;save();updateBoostUI()};
 $('bminus').onclick=()=>stepBoost(-1);$('bplus').onclick=()=>stepBoost(1);
-$('bval').onclick=()=>{SET.units=SET.units==='psi'?'bar':'psi';save();updateBoostUI()};
+refreshUnits=group('optUnits',[['bar','bar'],['psi','psi']],()=>SET.units,v=>{SET.units=v;save();updateBoostUI()});
+
+// setup sheet: tabs that each fit the screen; picking an engine closes it so the cluster shows straight away
+function openSheet(tab){$('sheet').hidden=false;showTab(tab)}
+function showTab(tab){
+  for(const b of document.querySelectorAll('[data-tab]'))b.setAttribute('aria-selected',String(b.dataset.tab===tab));
+  for(const p of document.querySelectorAll('[data-page]'))p.hidden=p.dataset.page!==tab;
+}
+for(const b of document.querySelectorAll('[data-tab]'))b.onclick=()=>showTab(b.dataset.tab);
+$('engPick').onclick=()=>openSheet('engine');$('setBtn').onclick=()=>openSheet('car');
+$('sheetClose').onclick=()=>{$('sheet').hidden=true};
 
 function holdBtn(btn,on,off){
   btn.addEventListener('pointerdown',e=>{e.preventDefault();try{btn.setPointerCapture(e.pointerId)}catch(_){}on();btn.classList.add('held')});
@@ -909,6 +896,7 @@ addEventListener('keydown',e=>{
   if(e.target&&(e.target.tagName==='INPUT'))return;
   if(KEYS[e.code]){e.preventDefault();I[KEYS[e.code]]=true;const b=$(KEYS[e.code]+'Btn');if(b)b.classList.add('held');return}
   if(e.repeat)return;
+  if(e.code==='Escape'&&!$('sheet').hidden){$('sheet').hidden=true;return}
   if(e.code==='ArrowRight'||e.code==='KeyE'||e.code==='Period'){e.preventDefault();userShift(1)}
   else if(e.code==='ArrowLeft'||e.code==='KeyQ'||e.code==='Comma'){e.preventDefault();userShift(-1)}
   else if(e.code==='Space'&&$('overlay').hidden){e.preventDefault();powerToggle()}
@@ -929,7 +917,7 @@ async function powerToggle(){
       E=await loadEngine(SET.engine,fmtOf(SET.engine));updateEngineUI();refreshEngineGrid();
     }
     startSequence();
-  }catch(e){$('powerBtn').textContent='Start engine';toast('Could not load the engine');$('loadNote').textContent='Engine failed to load: '+e.message;console.warn(e)}
+  }catch(e){$('powerBtn').textContent='Start';toast('Could not load the engine');$('loadNote').textContent='Engine failed to load: '+e.message;console.warn(e)}
 }
 $('startBtn').onclick=async()=>{
   ensureCtx();try{ctx.resume()}catch(e){}   // must happen inside the tap
@@ -939,46 +927,184 @@ $('startBtn').onclick=async()=>{
 function startMotionIfNeeded(){if(srcEff()==='phone')startMotion()} // iOS needs this inside the tap
 $('powerBtn').onclick=()=>{startMotionIfNeeded();powerToggle()};
 
-// ---------- gauges ----------
-const cv=$('tach'),cx=cv.getContext('2d');const A0=Math.PI*.75,A1=Math.PI*2.25;
-for(let i=0;i<10;i++)$('leds').appendChild(document.createElement('i'));
-function drawTach(){
-  const W=cv.width,c=W/2,R=W*.44;cx.clearRect(0,0,W,W);
-  const red=E?E.meta.red:7000,lim=E?E.limit:7400;
-  const maxR=Math.ceil(lim/1000)+(lim>12000?1:1),step=maxR>12?2:1,ang=v=>A0+(A1-A0)*clamp(v/(maxR*1000));
-  cx.lineCap='round';cx.lineWidth=W*.035;
-  cx.strokeStyle='#232b35';cx.beginPath();cx.arc(c,c,R,A0,A1);cx.stroke();
-  cx.strokeStyle='rgba(229,72,59,.55)';cx.beginPath();cx.arc(c,c,R,ang(red),A1);cx.stroke();
-  cx.strokeStyle=D.rpm>red*.97?'#e5483b':'#f2a33a';cx.beginPath();cx.arc(c,c,R,A0,Math.max(A0+.001,ang(D.rpm)));cx.stroke();
-  cx.textAlign='center';cx.textBaseline='middle';cx.font='600 '+W*.05+'px "Barlow Condensed",sans-serif';
-  for(let i=0;i<=maxR;i+=step){const t=ang(i*1000);cx.fillStyle=i*1000>=red?'#e5483b':'#8c96a3';cx.fillText(i,c+Math.cos(t)*R*.82,c+Math.sin(t)*R*.82);
-    cx.strokeStyle='#3a4552';cx.lineWidth=W*.006;cx.beginPath();cx.moveTo(c+Math.cos(t)*R*.9,c+Math.sin(t)*R*.9);cx.lineTo(c+Math.cos(t)*R*.95,c+Math.sin(t)*R*.95);cx.stroke()}
-  cx.fillStyle='#8c96a3';cx.font='500 '+W*.03+'px "IBM Plex Sans",sans-serif';cx.fillText('×1000 r/min',c,c+R*.68);
+// ---------- cluster: a retro digital dash on one canvas ----------
+// Vacuum-fluorescent look: seven-segment numbers and a sweeping bar-graph tach whose unlit segments stay faintly
+// visible, 5x7 dot-matrix labels. The unlit parts and labels only change with size, engine, units or boost target,
+// so they're drawn into a cached layer; each frame draws the lit parts over it. Lays out for landscape (car screen,
+// phone on its side) or portrait (phone).
+const CV=$('cluster'),CX=CV.getContext('2d'),STC=document.createElement('canvas'),SX=STC.getContext('2d');
+const COL={vfd:'#38f5cf',amber:'#ffb12b',red:'#ff3b2f',blue:'#5c8dff',vac:'#6f9690',
+  ghost:'rgba(56,245,207,.075)',label:'#1f9a84',frame:'rgba(56,245,207,.18)'};
+const SEG7={'0':'abcdef','1':'bc','2':'abdeg','3':'abcdg','4':'bcfg','5':'acdfg','6':'acdefg','7':'abc','8':'abcdefg',
+  '9':'abcdfg','-':'g','n':'ceg',' ':''};
+const DM={};   // 5x7 dot-matrix glyphs: 7 rows, 5 bits each (left = 16)
+('0 0e11131519110e|1 040c040404040e|2 0e11010204081f|3 1f02040201110e|4 02060a121f0202|5 1f101e0101110e|'+
+ '6 0608101e11110e|7 1f010204080808|8 0e11110e11110e|9 0e11110f01020c|A 0e1111111f1111|B 1e11111e11111e|'+
+ 'C 0e11101010110e|D 1c12111111121c|E 1f10101e10101f|F 1f10101e101010|G 0e11101711110f|H 1111111f111111|'+
+ 'I 0e04040404040e|J 0702020202120c|K 11121418141211|L 1010101010101f|M 111b1515111111|N 11111915131111|'+
+ 'O 0e11111111110e|P 1e11111e101010|Q 0e11111115120d|R 1e11111e141211|S 0f10100e01011e|T 1f040404040404|'+
+ 'U 1111111111110e|V 11111111110a04|W 1111111515150a|X 11110a040a1111|Y 1111110a040404|Z 1f01020408101f|'+
+ '. 00000000000c0c|- 0000001f000000|+ 0004041f040400|/ 00010204081000|: 000c0c000c0c00|· 0000000c0c0000|'+
+ '( 02040808080402|) 08040202020408|% 18190204081303|▲ 00040e1f000000|▼ 001f0e04000000|× 00110a040a1100')
+  .split('|').forEach(s=>{DM[s[0]]=[0,2,4,6,8,10,12].map(i=>parseInt(s.slice(2+i,4+i),16))});
+const dmW=(s,p)=>s.length*6*p-p;
+function dm(c,str,x,y,p,color,align){   // dot-matrix text at x,y (top), left / centred ('c') / right-aligned ('r')
+  str=String(str).toUpperCase();const w=dmW(str,p),s=Math.max(1,p*.8);
+  if(align==='c')x-=w/2;else if(align==='r')x-=w;
+  c.fillStyle=color;
+  for(let i=0;i<str.length;i++){const g=DM[str[i]];if(!g)continue;const gx=x+i*6*p;
+    for(let r=0;r<7;r++){const b=g[r];if(b)for(let k=0;k<5;k++)if(b&(16>>k))c.fillRect(gx+k*p,y+r*p,s,s)}}
 }
-function drawLeds(now){
-  const leds=$('leds').children;if(!E||!D.running){for(const l of leds)l.className='';return}
-  const red=E.meta.red,pt=SET.style==='manual'?red*.97:Math.min(red*.985,upRpm(Math.max(D.demand,.3)));
-  const startR=pt*.72,f=clamp((D.rpm-startR)/(pt-startR)),n=Math.round(f*leds.length),flash=D.rpm>=pt*.995;
-  for(let i=0;i<leds.length;i++)leds[i].className=flash?((now/90|0)%2?'b':''):i<n?(i<5?'g':i<8?'y':'r'):'';
+function segPath(c,x0,y0,x1,y1,t){   // one bevelled segment between two joints
+  const L=Math.hypot(x1-x0,y1-y0),ux=(x1-x0)/L,uy=(y1-y0)/L,h=t/2,g=t*.3,ax=x0+ux*g,ay=y0+uy*g,bx=x1-ux*g,by=y1-uy*g;
+  c.moveTo(ax,ay);c.lineTo(ax+(ux-uy)*h,ay+(uy+ux)*h);c.lineTo(bx-(ux+uy)*h,by+(ux-uy)*h);c.lineTo(bx,by);
+  c.lineTo(bx-(ux-uy)*h,by-(uy+ux)*h);c.lineTo(ax+(ux+uy)*h,ay-(ux-uy)*h);c.closePath();
 }
-function drawReadouts(){
-  $('gear').textContent=D.running&&D.gear>0?D.gear:'N';
-  $('rpm').textContent=Math.round(D.rpm/10)*10+' RPM';
-  $('speed').textContent=Math.round(D.speed*3.6);
-  const tt=E?transType():'',tag=$('modeTag');
-  const lim=D.running&&D.limW>.5,slip=D.running&&D.slip&&D.demand>.04&&D.speed>.05;
-  tag.textContent=!D.running?(E?'Engine off':''):D.starting>0?'Starting':lim?'Limiter':D.shift?(D.shift.up?'Shift ▲':'Shift ▼ blip'):slip?'Clutch slip':(TRANS_NAME[tt]||'')+' · '+SET.style;
-  tag.classList.toggle('hot',lim);
-  $('tThr').style.width=(D.loadEff*100).toFixed(0)+'%';$('tClu').style.width=(D.clutch*100).toFixed(0)+'%';$('tBrk').style.width=(D.brake*100).toFixed(0)+'%';
-  const on=turboOn(),bt=boostTarget(),b=on?D.boost:0,psi=SET.units==='psi',val=psi?b*14.5038:b;
-  $('bval').textContent=(val>=0?'+':'−')+Math.abs(val).toFixed(psi?1:2);
-  const lo=-1,hi=bt+.5,z=(0-lo)/(hi-lo);
-  $('bzero').style.left=(z*100)+'%';$('btgt').style.left=(clamp((bt-lo)/(hi-lo))*100)+'%';
-  const fb=clamp((b-lo)/(hi-lo));$('bfill').style.left=(Math.min(fb,z)*100)+'%';$('bfill').style.width=(Math.abs(fb-z)*100)+'%';
-  $('bfill').style.background=b<0?'#8c96a3':b>bt*.92?'#f2a33a':'#5aa9c9';
+const DIG=.6;   // digit advance, as a fraction of digit height
+function digit(c,x,y,h,ch,dp,color,glow){   // one seven-segment digit, cell DIG*h wide and h tall, leaning forward
+  const t=h*.11,w=h*.4,hh=h-t*1.4,lit=SEG7[ch]||'';
+  const J={a:[0,0,w,0],b:[w,0,w,hh/2],c:[w,hh/2,w,hh],d:[0,hh,w,hh],e:[0,hh/2,0,hh],f:[0,0,0,hh/2],g:[0,hh/2,w,hh/2]};
+  c.save();c.translate(x+t*.7+hh*.08,y+t*.7);c.transform(1,0,-.08,1,0,0);
+  c.beginPath();for(const s of lit)segPath(c,...J[s],t);if(dp)c.rect(w+t*.55,hh-t*.5,t,t);
+  if(glow){c.shadowColor=color;c.shadowBlur=t*1.5}c.fillStyle=color;c.fill();c.restore();
+}
+function num(c,str,xr,y,h,color,glow){   // right-aligned at xr; '.' lights the point of the digit before it
+  const cells=[];for(const ch of str)if(ch==='.'&&cells.length)cells[cells.length-1][1]=true;else cells.push([ch,false]);
+  let x=xr-cells.length*DIG*h;for(const[ch,dp]of cells){digit(c,x,y,h,ch,dp,color,glow);x+=DIG*h}
+}
+function layout(W,H){
+  const ar=W/H,L={W,H,land:ar>=1.3};
+  if(ar>=2){            // wide (car screen, phone on its side): pedals | speed | gear | rpm + boost under the tach
+    const p=H*.0062;
+    Object.assign(L,{p,
+      sl:{x:W*.2,y:H*.03,w:W*.6,h:H*.05},
+      tach:{x:W*.03,y:H*.1,w:W*.94,h:H*.35,n:72},scaleY:H*.475,
+      ped:{x:W*.03,y:H*.6,w:W*.2,h:H*.045,dx:0,dy:H*.1,n:16},
+      mode:{x:W*.03,y:H*.9,p:H*.0062,a:'l'},
+      speed:{xr:W*.52,y:H*.57,h:H*.3,ly:H*.9},
+      gear:{x:W*.55,y:H*.56,w:Math.max(W*.1,H*.24),h:H*.38},
+      rpm:{xr:W*.97,y:H*.6,h:H*.1,lx:W*.55+Math.max(W*.1,H*.24)+W*.03,ly:H*.57},
+      boost:{x:W*.55+Math.max(W*.1,H*.24)+W*.03,w:W*.42-Math.max(W*.1,H*.24)-W*.03,ly:H*.74,by:H*.785,bh:H*.035,vy:H*.85,vh:H*.09,n:30}});
+  }else if(L.land){     // landscape
+    const p=H*.0062;
+    Object.assign(L,{p,
+      sl:{x:W*.12,y:H*.03,w:W*.76,h:H*.045},
+      tach:{x:W*.035,y:H*.1,w:W*.93,h:H*.33,n:64},scaleY:H*.455,
+      speed:{xr:W*.4,y:H*.565,h:H*.25,ly:H*.835},
+      gear:{x:W*.45,y:H*.555,w:W*.125,h:H*.33},
+      rpm:{xr:W*.965,y:H*.575,h:H*.095,lx:W*.625,ly:H*.59},
+      boost:{x:W*.625,w:W*.34,ly:H*.705,by:H*.745,bh:H*.032,vy:H*.8,vh:H*.075,n:34},
+      ped:{x:W*.035,y:H*.935,w:W*.165,h:H*.028,dx:W*.19,dy:0,n:16},
+      mode:{x:W*.965,y:H*.932,p:H*.0062,a:'r'}});
+  }else{
+    const p=Math.min(H*.0045,W*.0075),gh=Math.min(H*.17,W*.36),sh=Math.min(H*.2,W*.58/(3*DIG));
+    Object.assign(L,{p,
+      sl:{x:W*.06,y:H*.02,w:W*.88,h:H*.032},
+      tach:{x:W*.04,y:H*.07,w:W*.92,h:H*.19,n:40},scaleY:H*.275,
+      gear:{x:W*.04,y:H*.335,w:W*.27,h:gh+H*.06},
+      speed:{xr:W*.96,y:H*.345,h:sh,ly:H*.345+sh+H*.015},
+      rpm:{xr:W*.47,y:H*.64,h:H*.055,lx:W*.04,ly:H*.612},
+      boost:{x:W*.53,w:W*.43,ly:H*.612,by:H*.645,bh:H*.022,vy:H*.68,vh:H*.05,n:24},
+      ped:{x:W*.04,y:H*.775,w:W*.92,h:H*.022,dx:0,dy:H*.045,n:30},
+      mode:{x:W*.5,y:H*.935,p:Math.min(H*.005,W/(24*6)),a:'c'}});
+  }
+  return L;
+}
+function tachBars(L,maxR){
+  const{x,y,w,h,n}=L.tach,bw=w/n,out=[];
+  for(let i=0;i<n;i++){const f=i/(n-1),bh=h*(.2+.8*Math.pow(f,1.4));out.push({x:x+i*bw+bw*.17,w:bw*.66,y:y+h-bh,h:bh,r:(i+.5)/n*maxR})}
+  return out;
+}
+const barCol=(r,red)=>r>=red?COL.red:r>=red*.8?COL.amber:COL.vfd;
+const BOOST_LO=-1,boostHi=bt=>bt+.5;
+function pedalGeo(L,k){   // label position and bar of the k-th pedal (THR, CLU, BRK)
+  const P=L.ped,p=L.p*.85,x=P.x+k*P.dx,y=P.y+k*P.dy,lw=dmW('THR',p)+p*3;
+  return{p,lx:x,ly:y+(P.h-7*p)/2,bx:x+lw,by:y,bw:P.w-lw,bh:P.h};
+}
+function drawStatic(c,L,red,maxR,psi,turbo,bt){
+  const{W,H,p}=L;c.clearRect(0,0,W,H);
+  // shift lamps
+  const S=L.sl,lw=S.w/10;c.fillStyle='rgba(255,255,255,.035)';c.strokeStyle=COL.frame;c.lineWidth=Math.max(1,p*.4);
+  for(let i=0;i<10;i++){c.fillRect(S.x+i*lw+lw*.12,S.y,lw*.76,S.h);c.strokeRect(S.x+i*lw+lw*.12,S.y,lw*.76,S.h)}
+  // tach: unlit bars, redline, scale
+  c.fillStyle=COL.ghost;for(const b of L.bars)c.fillRect(b.x,b.y,b.w,b.h);
+  const T=L.tach,rx=T.x+T.w*clamp(red/maxR);c.fillStyle=COL.red;c.fillRect(rx,T.y+T.h+p*1.2,T.x+T.w-rx,Math.max(1,p*.7));
+  const st=maxR>12000?2:1;
+  for(let k=0;k*1000<=maxR;k+=st)dm(c,String(k),T.x+T.w*k*1000/maxR,L.scaleY,p,k*1000>=red?COL.red:COL.label,'c');
+  dm(c,'×1000 R/MIN',T.x,T.y+p,p*.8,COL.label);   // above the short low-rpm bars
+  // speed
+  const Sp=L.speed;num(c,'888',Sp.xr,Sp.y,Sp.h,COL.ghost);dm(c,'KM/H',Sp.xr,Sp.ly,p*1.1,COL.label,'r');
+  // gear
+  const G=L.gear;c.strokeStyle=COL.frame;c.lineWidth=Math.max(1,p*.5);c.strokeRect(G.x,G.y,G.w,G.h);
+  dm(c,'GEAR',G.x+G.w/2,G.y+p*2,p,COL.label,'c');
+  const gh=(G.h-p*12)*.92;digit(c,G.x+(G.w-DIG*gh)/2,G.y+p*11,gh,'8',false,COL.ghost);
+  // rpm
+  const R=L.rpm;num(c,'88888',R.xr,R.y,R.h,COL.ghost);dm(c,'RPM',R.lx,R.ly,p,COL.label);
+  // boost
+  const B=L.boost;
+  if(turbo){
+    dm(c,'BOOST '+(psi?'PSI':'BAR'),B.x,B.ly,p,COL.label);
+    const hi=boostHi(bt),sw=B.w/B.n;c.fillStyle=COL.ghost;for(let i=0;i<B.n;i++)c.fillRect(B.x+i*sw+sw*.15,B.by,sw*.7,B.bh);
+    const zx=B.x+B.w*(0-BOOST_LO)/(hi-BOOST_LO),tx=B.x+B.w*(bt-BOOST_LO)/(hi-BOOST_LO);
+    c.fillStyle=COL.label;c.fillRect(zx-p*.3,B.by-p*1.5,p*.6,B.bh+p*3);c.fillStyle=COL.amber;c.fillRect(tx-p*.3,B.by-p*1.5,p*.6,B.bh+p*3);
+    num(c,psi?'888.8':'88.88',B.x+B.w,B.vy,B.vh,COL.ghost);
+  }else dm(c,'TURBO OFF',B.x,B.ly,p,COL.label);
+  // pedals
+  for(const[k,n]of['THR','CLU','BRK'].entries()){const g=pedalGeo(L,k),sw=g.bw/L.ped.n;dm(c,n,g.lx,g.ly,g.p,COL.label);
+    c.fillStyle=COL.ghost;for(let i=0;i<L.ped.n;i++)c.fillRect(g.bx+i*sw+sw*.15,g.by,sw*.7,g.bh)}
+}
+let STK='',LAY=null;
+function drawCluster(now){
+  const dpr=Math.min(2,window.devicePixelRatio||1),cw=CV.clientWidth,ch=CV.clientHeight;if(!cw||!ch)return;
+  const W=Math.round(cw*dpr),H=Math.round(ch*dpr);
+  if(CV.width!==W||CV.height!==H){CV.width=STC.width=W;CV.height=STC.height=H}
+  const red=E?E.meta.red:7000,lim=E?E.limit:7400,maxR=Math.ceil(lim/1000)*1000,psi=SET.units==='psi',on=!!E&&turboOn(),bt=on?boostTarget():1;
+  const key=[W,H,red,maxR,psi,on,bt].join('|');
+  if(key!==STK){STK=key;LAY=layout(W,H);LAY.bars=tachBars(LAY,maxR);drawStatic(SX,LAY,red,maxR,psi,on,bt)}
+  const L=LAY,c=CX,p=L.p;c.clearRect(0,0,W,H);c.drawImage(STC,0,0);
+  // shift lamps
+  if(E&&D.running){
+    const pt=SET.style==='manual'?red*.97:Math.min(red*.985,upRpm(Math.max(D.demand,.3))),s0=pt*.72;
+    const n=Math.round(clamp((D.rpm-s0)/(pt-s0))*10),flash=D.rpm>=pt*.995,S=L.sl,lw=S.w/10;
+    c.save();c.shadowBlur=S.h*.8;
+    for(let i=0;i<10;i++){const col=flash?((now/90|0)%2?COL.blue:null):i<n?(i<5?COL.vfd:i<8?COL.amber:COL.red):null;
+      if(col){c.fillStyle=c.shadowColor=col;c.fillRect(S.x+i*lw+lw*.12,S.y,lw*.76,S.h)}}
+    c.restore();
+  }
+  // tach bars: one path per colour, filled once with glow
+  const paths={};for(const b of L.bars){if(D.rpm<b.r-maxR/L.tach.n*.5)break;const col=barCol(b.r,red);(paths[col]=paths[col]||[]).push(b)}
+  c.save();c.shadowBlur=L.bars[0].w*1.2;
+  for(const col in paths){c.beginPath();for(const b of paths[col])c.rect(b.x,b.y,b.w,b.h);c.fillStyle=c.shadowColor=col;c.fill()}
+  c.restore();
+  // speed, gear, rpm
+  const Sp=L.speed;num(c,String(Math.min(999,Math.round(D.speed*3.6))).padStart(3,' '),Sp.xr,Sp.y,Sp.h,COL.vfd,true);
+  const G=L.gear,gh=(G.h-p*12)*.92,gch=!D.running?'-':D.gear>0?String(D.gear):'n';
+  digit(c,G.x+(G.w-DIG*gh)/2,G.y+p*11,gh,gch,false,D.shift?COL.amber:COL.amber,true);
+  const R=L.rpm;num(c,String(Math.round(D.rpm/10)*10).padStart(5,' '),R.xr,R.y,R.h,D.rpm>=red?COL.red:COL.vfd,true);
+  // boost
+  if(on){
+    const B=L.boost,hi=boostHi(bt),b=D.boost,sw=B.w/B.n,col=b<0?COL.vac:b>bt*.92?COL.amber:COL.vfd;
+    c.save();c.shadowBlur=B.bh*.8;c.fillStyle=c.shadowColor=col;c.beginPath();
+    for(let i=0;i<B.n;i++){const v=BOOST_LO+(i+.5)/B.n*(hi-BOOST_LO);if(b<0?(v<0&&v>=b):(v>0&&v<=b))c.rect(B.x+i*sw+sw*.15,B.by,sw*.7,B.bh)}
+    c.fill();c.restore();
+    const val=psi?b*14.5038:b,txt=(val<0?'-':' ')+(psi?Math.abs(val).toFixed(1).padStart(4,' '):Math.abs(val).toFixed(2));
+    num(c,txt,B.x+B.w,B.vy,B.vh,col,true);
+  }
+  // pedals
+  for(const[k,v,col]of[[0,D.loadEff,COL.amber],[1,D.clutch,COL.vfd],[2,D.brake,COL.red]]){
+    const g=pedalGeo(L,k),n=L.ped.n,sw=g.bw/n,m=Math.round(clamp(v)*n);if(!m)continue;
+    c.fillStyle=col;for(let i=0;i<m;i++)c.fillRect(g.bx+i*sw+sw*.15,g.by,sw*.7,g.bh);
+  }
+  // mode line
+  const st=LOADST[SET.engine+'|'+fmtOf(SET.engine)],tt=E?transType():'';
+  const limOn=D.running&&D.limW>.5,slip=D.running&&D.slip&&D.demand>.04&&D.speed>.05;
+  let txt=!D.running?(E?'ENGINE OFF':'READY'):D.starting>0?'STARTING':limOn?'LIMITER':D.shift?(D.shift.up?'SHIFT ▲':'SHIFT ▼ BLIP'):
+    slip?'CLUTCH SLIP':(TRANS_NAME[tt]||'')+' · '+SET.style,col=limOn?COL.red:COL.vfd;
+  if(st==='error'){txt='LOAD FAILED';col=COL.red}else if(st){txt='LOADING '+st;col=COL.amber}
+  dm(c,txt,L.mode.x,L.mode.y,L.mode.p,col,L.mode.a);
 }
 function render(now){
-  requestAnimationFrame(render);drawTach();drawLeds(now);drawReadouts();
+  requestAnimationFrame(render);drawCluster(now);
   if(M.on&&M.events)setMot(motionLive()?'ok':'warn',motionLive()?'Motion live · instant response':'Motion: learning which way is forward, drive normally');
 }
 requestAnimationFrame(render);

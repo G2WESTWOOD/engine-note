@@ -22,6 +22,10 @@ sound follows the pedal instantly.
 Space to start/stop. Letting go of Gas works like Tesla one-pedal driving: regen slows the car at up to about 0.2 g
 and brings it to a stop.
 
+The screen is a retro digital dash that fits any screen without scrolling. Tap the engine name at the top to change
+engine (a passenger can do it while driving: the swap happens on the move), and **Setup** for everything else (Car,
+Drive and Sound tabs).
+
 The app detects which of the three it is running on. You can override it under Speed data, or with
 `?device=tesla|phone|desktop` in the URL.
 
@@ -35,7 +39,7 @@ The app detects which of the three it is running on. You can override it under S
 | Gearing | **Matched to car** (default): the final drive is set so top gear reaches your Tesla's top speed (250 km/h on a Model Y Performance) just under the redline, and 1st lasts at least about 2 s at your Tesla's full acceleration. Where a gearbox spreads too wide for both, its ratios are pulled closer together on the same spacing pattern. **Original car**: the real car's ratios (long gears; a Tesla runs through 1st much faster than the original car). |
 | Shifting | Comfort, Sport, Track (automatic shift points, kickdown, rev-matched downshifts) or Manual (you shift with ◀ ▶). In the automatic modes ◀ ▶ work as paddles for a few seconds. |
 | Gearbox | Car default, Manual (clutch in/out, heel-and-toe), DCT, Sequential or Automatic: changes shift time and feel. |
-| Turbo | On/off per engine. Boost target is set with − / + next to the live boost readout (tap the readout for psi). Two-state model: the turbo shaft has inertia and spools with exhaust flow (rpm × load); boost follows the shaft, capped by the wastegate, and drops to vacuum on a lift while the shaft winds down. The whistle's pitch and volume follow the shaft, so it gets louder as the turbo spools up and fades as it winds down. |
+| Turbo | On/off per engine. Boost target is set with − / + (and bar or psi) in Setup → Drive. Two-state model: the turbo shaft has inertia and spools with exhaust flow (rpm × load); boost follows the shaft, capped by the wastegate, and drops to vacuum on a lift while the shaft winds down. The whistle's pitch and volume follow the shaft, so it gets louder as the turbo spools up and fades as it winds down. |
 | Blow-off valve, Pops | Optional extras. The valve fires when the throttle drops 60 % within 100 ms with boost (0.5 s lockout), with ±3 % pitch variation. It uses recorded samples if `samples/index.json` lists them under `"bov": {"pssh": [...], "flutter": [...]}`, otherwise synthetic variants. Off-throttle pops are off by default. |
 | Pedal feel | How hard you have to accelerate for full load (car and phone modes). |
 | Sound field, Volume, Sub bass | Surround sends the exhaust to the rear speakers on matrix upmixers. Sub bass is the recording's own low end, centred for the subwoofer. |
